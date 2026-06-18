@@ -1,0 +1,55 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  margin: 0;
+  background: #f5f6f8;
+  color: #1f2937;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 32px;
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+}
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.admin-link {
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #2563eb;
+  color: white;
+  text-decoration: none;
+}
+main { padding: 24px 32px; }
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.row { display: flex; justify-content: space-between; align-items: center; }
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #111827;
+  color: white;
+  cursor: pointer;
+}
+button.secondary { background: #6b7280; }
+input { margin: 8px 0 12px; }
+pre {
+  background: #f3f4f6;
+  border-radius: 8px;
+  padding: 12px;
+  overflow: auto;
+}
+table { width: 100%; border-collapse: collapse; }
+th, td { border-bottom: 1px solid #e5e7eb; text-align: left; padding: 10px; }
+th { background: #f9fafb; }
+a { color: #2563eb; }

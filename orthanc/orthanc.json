@@ -1,0 +1,25 @@
+{
+  "Name": "DICOM Customer Portal Orthanc",
+  "Plugins": [
+    "/usr/local/share/orthanc/plugins/libOrthancDicomWeb.so",
+    "/usr/local/share/orthanc/plugins/libOrthancExplorer2.so",
+    "/usr/local/share/orthanc/plugins/libStoneWebViewer.so",
+    "/usr/local/share/orthanc/plugins/libOrthancWebViewer.so",
+    "/usr/local/share/orthanc/plugins/libOrthancOHIF.so"
+  ],
+  "StorageDirectory": "/var/lib/orthanc/db",
+  "IndexDirectory": "/var/lib/orthanc/db",
+  "RemoteAccessAllowed": true,
+  "AuthenticationEnabled": true,
+  "RegisteredUsers": {
+    "orthanc": "orthanc"
+  },
+  "DicomWeb": {
+    "Enable": true,
+    "Root": "/dicom-web/",
+    "PublicRoot": "/dicom-web/",
+    "EnableWado": true,
+    "WadoRoot": "/wado",
+    "Ssl": false
+  }
+}

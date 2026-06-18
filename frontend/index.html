@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DICOM 客戶上傳入口</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>DICOM 客戶上傳入口</h1>
+    <div class="actions">
+      <a id="keycloakAdminLink" class="admin-link" href="http://localhost:8080/admin/master/console/#/dicom" target="_blank" rel="noopener" hidden>Keycloak 管理</a>
+      <a id="orthancAdminLink" class="admin-link" href="http://localhost:8042/app/explorer.html" target="_blank" rel="noopener" hidden>Orthanc 管理</a>
+      <a id="wazuhLink" class="admin-link" href="http://localhost:5601/" target="_blank" rel="noopener" hidden>Wazuh</a>
+      <button id="loginBtn">SSO 登入</button>
+      <button id="logoutBtn" class="secondary" hidden>登出</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>帳號資訊</h2>
+      <pre id="me">尚未登入</pre>
+    </section>
+
+    <section class="card">
+      <h2>上傳 DICOM</h2>
+      <p>可一次選多個 <code>.dcm</code> 檔案，或直接上傳包含 DICOM 的 <code>.zip</code>。上傳後會寫入 Orthanc，並在本系統記錄租戶歸屬。</p>
+      <input id="fileInput" type="file" multiple accept=".dcm,.dicom,.zip,application/dicom,application/zip" />
+      <button id="uploadBtn">上傳</button>
+      <pre id="uploadResult"></pre>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>影像清單</h2>
+        <button id="refreshBtn" class="secondary">重新整理</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>上傳者</th>
+            <th>上傳時間</th>
+            <th>Patient ID</th>
+            <th>Patient Name</th>
+            <th>Study Date</th>
+            <th>Modality</th>
+            <th>Description</th>
+            <th>檢視</th>
+          </tr>
+        </thead>
+        <tbody id="studyRows">
+          <tr><td colspan="8">尚無資料</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/app.js?v=20260618-pkce-fallback"></script>
+</body>
+</html>
