@@ -1,0 +1,262 @@
+:root {
+  --dicom-ink: #142033;
+  --dicom-muted: #657184;
+  --dicom-line: #d9e5ec;
+  --dicom-primary: #0f766e;
+  --dicom-primary-dark: #115e59;
+  --dicom-primary-soft: #d9f3ef;
+  --dicom-navy: #10233e;
+}
+
+body.dicom-login,
+.dicom-login body,
+.login-pf {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 16% 14%, rgba(94, 234, 212, 0.24), transparent 24rem),
+    radial-gradient(circle at 88% 18%, rgba(56, 189, 248, 0.16), transparent 28rem),
+    linear-gradient(135deg, #0d1b2f 0%, #123948 48%, #0c1727 100%) !important;
+  color: var(--dicom-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+}
+
+.login-pf::before {
+  position: fixed;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.85), transparent 78%);
+}
+
+.login-pf-page {
+  display: grid;
+  width: min(1120px, calc(100% - 40px));
+  min-height: 100vh;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 480px);
+  gap: clamp(28px, 7vw, 92px);
+  align-items: center;
+  margin: 0 auto;
+  padding: 48px 0;
+}
+
+.login-pf-page .login-pf-header {
+  margin: 0;
+  text-align: left;
+}
+
+#kc-header {
+  margin: 0;
+  color: #ffffff;
+}
+
+#kc-header-wrapper {
+  max-width: 520px;
+  padding: 0;
+  color: #ffffff;
+  font-size: clamp(42px, 6vw, 72px);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.98;
+  text-transform: none;
+}
+
+#kc-header-wrapper::before {
+  display: inline-grid;
+  width: 56px;
+  height: 56px;
+  place-items: center;
+  margin-bottom: 24px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--dicom-primary), #155e75);
+  box-shadow: 0 18px 42px rgba(15, 118, 110, 0.34);
+  color: #ffffff;
+  content: "DCM";
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+#kc-header-wrapper::after {
+  display: block;
+  max-width: 480px;
+  margin-top: 22px;
+  color: rgba(255, 255, 255, 0.78);
+  content: "Secure access for DICOM uploads, OHIF viewing, and tenant-aware study management.";
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.7;
+}
+
+.card-pf {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: clamp(28px, 5vw, 46px);
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 28px 70px rgba(6, 18, 34, 0.34);
+}
+
+#kc-content,
+#kc-content-wrapper,
+#kc-form,
+#kc-form-wrapper {
+  width: 100%;
+}
+
+#kc-page-title {
+  margin: 0 0 24px;
+  color: var(--dicom-ink);
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+#kc-page-title::after {
+  display: block;
+  margin-top: 8px;
+  color: var(--dicom-muted);
+  content: "請使用您的入口帳號繼續";
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pf-c-form__label,
+.pf-v5-c-form__label,
+.pf-c-form__label-text,
+.pf-v5-c-form__label-text,
+label {
+  color: var(--dicom-ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.pf-c-form-control,
+.pf-v5-c-form-control,
+input[type="text"],
+input[type="password"] {
+  min-height: 44px;
+  border: 1px solid var(--dicom-line) !important;
+  border-radius: 8px;
+  background: #fbfdfe !important;
+  color: var(--dicom-ink);
+  box-shadow: none !important;
+  font-size: 15px;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.pf-c-form-control:focus,
+.pf-v5-c-form-control:focus,
+input[type="text"]:focus,
+input[type="password"]:focus {
+  border-color: var(--dicom-primary) !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.16) !important;
+  outline: none;
+}
+
+#kc-form-buttons {
+  margin-top: 28px;
+}
+
+.pf-c-button.pf-m-primary,
+.pf-v5-c-button.pf-m-primary,
+input[type="submit"],
+button[type="submit"] {
+  min-height: 46px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dicom-primary) !important;
+  color: #ffffff !important;
+  font-size: 15px;
+  font-weight: 900;
+  box-shadow: 0 14px 30px rgba(15, 118, 110, 0.26);
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.pf-c-button.pf-m-primary:hover,
+.pf-v5-c-button.pf-m-primary:hover,
+input[type="submit"]:hover,
+button[type="submit"]:hover {
+  background: var(--dicom-primary-dark) !important;
+  box-shadow: 0 18px 36px rgba(15, 118, 110, 0.32);
+  transform: translateY(-1px);
+}
+
+#input-error,
+.pf-c-alert,
+.pf-v5-c-alert {
+  border-radius: 8px;
+}
+
+#kc-info,
+#kc-info-wrapper {
+  background: transparent;
+}
+
+#kc-info-wrapper {
+  margin-top: 18px;
+  color: var(--dicom-muted);
+  font-size: 13px;
+}
+
+.login-pf-page .login-pf-signup {
+  color: var(--dicom-muted);
+}
+
+a,
+.pf-c-button.pf-m-link,
+.pf-v5-c-button.pf-m-link {
+  color: var(--dicom-primary-dark);
+  font-weight: 800;
+}
+
+.pf-c-input-group,
+.pf-v5-c-input-group {
+  border-radius: 8px;
+}
+
+.pf-c-input-group button,
+.pf-v5-c-input-group button {
+  border-color: var(--dicom-line) !important;
+  border-radius: 0 8px 8px 0;
+  background: #f8fbfc !important;
+  color: var(--dicom-ink) !important;
+}
+
+@media (max-width: 860px) {
+  .login-pf-page {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    align-content: center;
+    padding: 28px 0;
+  }
+
+  #kc-header-wrapper {
+    font-size: 38px;
+  }
+
+  #kc-header-wrapper::after {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 520px) {
+  .login-pf-page {
+    width: min(100% - 24px, 1120px);
+  }
+
+  .card-pf {
+    padding: 24px 18px;
+  }
+
+  #kc-page-title {
+    font-size: 24px;
+  }
+}

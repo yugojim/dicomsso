@@ -2,6 +2,7 @@
   "realm": "dicom",
   "enabled": true,
   "displayName": "DICOM Customer Portal",
+  "loginTheme": "dicom",
   "sslRequired": "none",
   "accessTokenLifespan": 1200,
   "ssoSessionIdleTimeout": 1200,

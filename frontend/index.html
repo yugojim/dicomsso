@@ -7,53 +7,91 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header>
-    <h1>DICOM 客戶上傳入口</h1>
-    <div class="actions">
+  <header class="site-header">
+    <a class="brand" href="/">
+      <span class="brand-mark">DCM</span>
+      <span>
+        <strong>DICOM Portal</strong>
+        <small>客戶影像上傳入口</small>
+      </span>
+    </a>
+    <nav class="actions" aria-label="系統操作">
       <a id="keycloakAdminLink" class="admin-link" href="http://localhost:8080/admin/master/console/#/dicom" target="_blank" rel="noopener" hidden>Keycloak 管理</a>
       <a id="orthancAdminLink" class="admin-link" href="http://localhost:8042/app/explorer.html" target="_blank" rel="noopener" hidden>Orthanc 管理</a>
       <a id="wazuhLink" class="admin-link" href="http://localhost:5601/" target="_blank" rel="noopener" hidden>Wazuh</a>
       <button id="loginBtn">SSO 登入</button>
       <button id="logoutBtn" class="secondary" hidden>登出</button>
-    </div>
+    </nav>
   </header>
 
   <main>
-    <section class="card">
-      <h2>帳號資訊</h2>
-      <pre id="me">尚未登入</pre>
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">Secure Medical Imaging Gateway</p>
+        <h1>DICOM 客戶上傳入口</h1>
+        <p class="lead">集中上傳、租戶歸屬、OHIF 檢視與安全稽核都在同一個工作台完成。</p>
+      </div>
+      <div class="status-panel">
+        <span class="status-dot"></span>
+        <span>SSO protected</span>
+        <strong>Orthanc + OHIF</strong>
+      </div>
+    </section>
+
+    <section class="workspace-grid">
+      <article class="card account-card">
+        <div class="section-heading">
+          <span class="section-kicker">Session</span>
+          <h2>帳號資訊</h2>
+        </div>
+        <pre id="me">尚未登入</pre>
+      </article>
+
+      <article class="card upload-card">
+        <div class="section-heading">
+          <span class="section-kicker">Upload</span>
+          <h2>上傳 DICOM</h2>
+        </div>
+        <p>可一次選多個 <code>.dcm</code> 檔案，或直接上傳包含 DICOM 的 <code>.zip</code>。上傳後會寫入 Orthanc，並在本系統記錄租戶歸屬。</p>
+        <label class="file-drop" for="fileInput">
+          <span>選擇 DICOM 或 ZIP 檔案</span>
+          <small>支援 .dcm、.dicom、.zip</small>
+          <input id="fileInput" type="file" multiple accept=".dcm,.dicom,.zip,application/dicom,application/zip" />
+        </label>
+        <div class="upload-actions">
+          <button id="uploadBtn">上傳檔案</button>
+        </div>
+        <pre id="uploadResult" aria-live="polite"></pre>
+      </article>
     </section>
 
     <section class="card">
-      <h2>上傳 DICOM</h2>
-      <p>可一次選多個 <code>.dcm</code> 檔案，或直接上傳包含 DICOM 的 <code>.zip</code>。上傳後會寫入 Orthanc，並在本系統記錄租戶歸屬。</p>
-      <input id="fileInput" type="file" multiple accept=".dcm,.dicom,.zip,application/dicom,application/zip" />
-      <button id="uploadBtn">上傳</button>
-      <pre id="uploadResult"></pre>
-    </section>
-
-    <section class="card">
-      <div class="row">
-        <h2>影像清單</h2>
+      <div class="row section-heading inline-heading">
+        <div>
+          <span class="section-kicker">Studies</span>
+          <h2>影像清單</h2>
+        </div>
         <button id="refreshBtn" class="secondary">重新整理</button>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>上傳者</th>
-            <th>上傳時間</th>
-            <th>Patient ID</th>
-            <th>Patient Name</th>
-            <th>Study Date</th>
-            <th>Modality</th>
-            <th>Description</th>
-            <th>檢視</th>
-          </tr>
-        </thead>
-        <tbody id="studyRows">
-          <tr><td colspan="8">尚無資料</td></tr>
-        </tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>上傳者</th>
+              <th>上傳時間</th>
+              <th>Patient ID</th>
+              <th>Patient Name</th>
+              <th>Study Date</th>
+              <th>Modality</th>
+              <th>Description</th>
+              <th>檢視</th>
+            </tr>
+          </thead>
+          <tbody id="studyRows">
+            <tr><td colspan="8">尚無資料</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </main>
 

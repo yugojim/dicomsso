@@ -29,6 +29,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
     volumes:
       - ./keycloak/realm-dicom.json:/opt/keycloak/data/import/realm-dicom.json:ro
+      - ./keycloak/themes/dicom:/opt/keycloak/themes/dicom:ro
     ports:
       - "8080:8080"
 
