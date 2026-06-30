@@ -34,8 +34,23 @@ Orthanc：儲存 DICOM
 
 ## 啟動
 
+只啟動 DICOM Portal 主系統：
+
 ```bash
 docker compose up --build
+```
+
+啟動 DICOM Portal + Wazuh：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml restart frontend
+```
+
+若需要看即時 log，可改用前景執行：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up --build
 ```
 
 開啟：
@@ -66,6 +81,33 @@ Wazuh 入口：http://192.168.1.112:5601
 `http://localhost:5601` 是經由 Nginx 保護的 Wazuh Dashboard 入口。使用者必須先在
 `http://localhost:8088` 登入，並具備 `admin`、`wazuh-admin` 或 `wazuh-readonly` 其中一種 role。
 Wazuh stack 預設不會跟主系統一起啟動，請見「Wazuh 整合」。
+
+如果啟動時看到 `listen tcp 0.0.0.0:3000: bind: address already in use`，代表本機已經有其他程式佔用
+OHIF 使用的 `3000` port。可先查詢並停止佔用者：
+
+```bash
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+kill <PID>
+```
+
+或將 `docker-compose.yml` 內 OHIF 的 port 改成其他值，例如 `3002:80`，並同步調整 backend 的
+`OHIF_VIEWER_URL`。
+
+如果登入後看到 `/api/me failed: 502 Bad Gateway`，通常是 backend 容器重建後，frontend Nginx
+仍連到舊的 backend container IP。先確認 backend 本身正常：
+
+```bash
+curl -s -D - http://localhost:8000/docs
+```
+
+若 backend 回 `200 OK`，重啟 frontend 讓 Nginx 重新解析 backend：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml restart frontend
+```
+
+再重新整理 `http://localhost:8088`。修正後，未登入狀態下 `/api/me` 應回 `401 Missing token`，而不是
+`502 Bad Gateway`。
 
 ## VM 建議規格
 
@@ -311,6 +353,44 @@ docker exec dicom-customer-portal-keycloak-1 /opt/keycloak/bin/kcadm.sh \
 
 注意：Keycloak 只會在 realm 初次匯入時套用 `realm-dicom.json`。如果已經啟動過環境，修改匯入檔不會自動覆蓋既有資料；開發環境可用 `docker compose down -v` 清掉 volume 後再重新啟動。
 
+## LINE Bot 上傳通知
+
+後端支援在 `/api/upload` 成功匯入 DICOM 並寫入入口網站資料庫後，用 LINE Messaging API 推播文字訊息到指定群組。未設定 LINE 變數時，通知功能會自動略過，不影響上傳。
+
+### LINE Developers 設定
+
+1. 到 LINE Developers 建立 Provider 與 Messaging API channel。
+2. 在 Messaging API channel 內取得 `Channel access token`，填入 `LINE_CHANNEL_ACCESS_TOKEN`。
+3. 在 Basic settings 取得 `Channel secret`，填入 `LINE_CHANNEL_SECRET`。
+4. 將 bot 加入要通知的 LINE 群組。
+5. 若需要取得群組 ID，先把 webhook URL 設為：
+
+```text
+https://<公開網域>/api/line/webhook
+```
+
+本機開發時可用 ngrok 或其他 tunnel 將 backend 的 `8000` port 暴露出去。群組內傳任一則訊息後，backend log 會印出：
+
+```text
+LINE webhook event source: type=group groupId=<LINE_GROUP_ID> ...
+```
+
+6. 將取得的 `groupId` 填入 `LINE_GROUP_ID`，重啟 backend。
+
+### 環境變數
+
+```env
+LINE_CHANNEL_ACCESS_TOKEN=<Messaging API channel access token>
+LINE_CHANNEL_SECRET=<Messaging API channel secret>
+LINE_GROUP_ID=<群組 groupId>
+```
+
+Docker Compose 已將這三個變數傳給 backend，可放在專案根目錄 `.env`：
+
+```bash
+docker compose up -d --build backend
+```
+
 ## API 摘要
 
 ### 取得登入者資訊
@@ -394,7 +474,103 @@ sudo sysctl -w vm.max_map_count=262144
 macOS Docker Desktop 請確認 Docker Desktop 分配的 CPU / Memory 足夠。啟動主系統加 Wazuh：
 
 ```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml restart frontend
+```
+
+若要看即時 log，可使用前景模式：
+
+```bash
 docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up --build
+```
+
+查看狀態：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml ps
+```
+
+查看 Wazuh 安裝 / 啟動進度：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml logs -f wazuh-certs-generator wazuh-indexer wazuh-manager wazuh-dashboard
+```
+
+各階段大致會看到：
+
+```text
+wazuh-certs-generator  產生憑證後 Exited，這是正常狀態
+wazuh-indexer          OpenSearch / indexer 啟動
+wazuh-manager          出現 Completed.、Started wazuh-apid、Connection to backoff(...) established
+wazuh-dashboard        出現 Server running at https://0.0.0.0:5601
+```
+
+停止主系統加 Wazuh：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml stop
+```
+
+若曾經只用 `docker compose up` 啟動主系統，之後再切換到 Wazuh compose，Docker 可能會提示 orphan
+containers。要一併清理不再屬於目前 compose 組合的舊容器，可以使用：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up --build --remove-orphans
+```
+
+如果 OHIF 啟動失敗並出現 `listen tcp 0.0.0.0:3000: bind: address already in use`，表示本機已有其他程式
+佔用 `3000`。可先查詢：
+
+```bash
+lsof -nP -iTCP:3000 -sTCP:LISTEN
+```
+
+再停止該行程：
+
+```bash
+kill <PID>
+```
+
+若該行程不能停止，請改用其他 OHIF port，例如在 `docker-compose.yml` 將 `ohif` 的 `3000:80`
+改為 `3002:80`，並把 backend 的 `OHIF_VIEWER_URL` 改為 `http://localhost:3002/viewer`。
+
+如果入口網站顯示 `/api/me failed: 502 Bad Gateway`，而 backend API 本身可開啟：
+
+```bash
+curl -s -D - http://localhost:8000/docs
+```
+
+表示 frontend Nginx 可能仍快取舊的 backend container IP。重啟 frontend 即可重新解析：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml restart frontend
+```
+
+重啟後可用以下指令確認狀態。未登入時回 `401 Missing token` 是正常的；若仍回 `502` 才代表 upstream
+仍有問題：
+
+```bash
+curl -s -D - http://localhost:8088/api/me
+```
+
+若 Wazuh 畫面顯示 `Error: 3002 - Request failed with status code 429`，代表 Wazuh Dashboard 在短時間內
+對 Wazuh Manager API 發出太多 health check / login 請求，被 Manager API 限流。先確認
+`wazuh/config/wazuh_dashboard/wazuh.yml` 使用本機驗收建議設定：
+
+```yaml
+run_as: false
+```
+
+然後重啟 Wazuh manager、dashboard 與 frontend：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml restart wazuh-manager wazuh-dashboard frontend
+```
+
+可用以下指令確認 Wazuh Manager API 已可正常取得版本資訊：
+
+```bash
+docker exec dicom-customer-portal-wazuh-dashboard-1 sh -c 'TOKEN=$(curl -sk -u wazuh-wui:"MyS3cr37P450r.*-" -X POST "https://wazuh.manager:55000/security/user/authenticate?raw=true"); curl -sk -H "Authorization: Bearer $TOKEN" https://wazuh.manager:55000/manager/info'
 ```
 
 開啟：
@@ -404,12 +580,11 @@ http://localhost:5601
 ```
 
 此入口由本專案 Nginx 先呼叫 backend 驗證 Keycloak cookie，通過後由 backend 回傳對應的
-Wazuh 身分，Nginx 再注入到 Wazuh Dashboard：
+Wazuh 身分，Nginx 再放行至 Wazuh Dashboard：
 
 ```text
-admin / wazuh-admin -> Wazuh admin
-wazuh-readonly      -> Wazuh kibanaro/readall
-其他使用者          -> 導回 http://localhost:8088
+admin / wazuh-admin / wazuh-readonly -> 可進入 Wazuh
+其他使用者                         -> 導回 http://localhost:8088
 ```
 
 因此日常使用時請從 `http://localhost:8088` 先用 Keycloak SSO 登入；有 Wazuh 權限的使用者會看到
@@ -421,11 +596,19 @@ wazuh-readonly      -> Wazuh kibanaro/readall
 若正式環境需要 Wazuh Dashboard 原生顯示 Keycloak SSO 流程，或要做更細緻的 Wazuh role mapping，
 請再依 Wazuh 官方 Keycloak SSO 文件設定 SAML。
 
-重點設定如下：
+本機驗收環境建議先保持：
+
+```yaml
+run_as: false
+```
+
+這樣可避免 Wazuh Dashboard 在 health check 階段因 `run_as` 重試過密而觸發 Manager API `429` 限流。
+
+若正式環境要改成 Wazuh 原生 SSO，重點設定如下：
 
 1. 在 Keycloak 建立 Wazuh 的 SAML client。
 2. 在 Wazuh Dashboard 啟用 SAML auth，保留 basicauth 作為 break-glass 管理登入。
-3. 在 `/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml` 保持：
+3. 在 `/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml` 改為：
 
 ```yaml
 run_as: true

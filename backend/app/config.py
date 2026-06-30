@@ -17,4 +17,8 @@ class Settings(BaseSettings):
     cors_origin: str = "http://localhost:8088"
     ohif_viewer_url: str = "http://localhost:3000/viewer"
 
+    line_channel_access_token: str = ""
+    line_channel_secret: str = ""
+    line_group_id: str = ""
+
 settings = Settings()

@@ -1,7 +1,8 @@
 from typing import Any
 from base64 import b64encode
+import logging
 from urllib.parse import quote
-from fastapi import FastAPI, Depends, File, UploadFile, HTTPException, Response
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
@@ -11,6 +12,9 @@ from .db import Base, engine, get_db
 from .models import DicomStudy
 from .auth import get_current_user, require_role
 from .orthanc_client import orthanc
+from . import line_bot
+
+logger = logging.getLogger(__name__)
 
 Base.metadata.create_all(bind=engine)
 
@@ -66,6 +70,25 @@ async def authorize_wazuh(response: Response, user=Depends(require_role("wazuh-a
     return {"ok": True, "username": user["username"], "tenant_id": user["tenant_id"]}
 
 
+@app.post("/api/line/webhook")
+async def line_webhook(request: Request, x_line_signature: str | None = Header(default=None)):
+    body = await request.body()
+    if not line_bot.verify_signature(body, x_line_signature):
+        raise HTTPException(status_code=401, detail="Invalid LINE signature")
+
+    payload = await request.json()
+    for event in payload.get("events", []):
+        source = event.get("source", {})
+        logger.info(
+            "LINE webhook event source: type=%s groupId=%s roomId=%s userId=%s",
+            source.get("type"),
+            source.get("groupId"),
+            source.get("roomId"),
+            source.get("userId"),
+        )
+    return {"ok": True}
+
+
 def normalize_upload_results(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         results = []
@@ -119,11 +142,13 @@ async def build_study_row(uploaded: dict[str, Any], user: dict[str, Any]) -> tup
 
 @app.post("/api/upload")
 async def upload_dicom(
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     user=Depends(require_role("uploader")),
 ):
     results = []
+    notification_studies = []
     for f in files:
         content = await f.read()
         if not content:
@@ -166,6 +191,18 @@ async def upload_dicom(
                 "orthanc_study_id": row.orthanc_study_id if row else None,
                 "study_instance_uid": tags.get("StudyInstanceUID"),
             })
+            notification_studies.append({
+                "filename": f.filename,
+                "orthanc_study_id": row.orthanc_study_id if row else None,
+                "study_instance_uid": tags.get("StudyInstanceUID"),
+                "patient_id": row.patient_id if row else tags.get("PatientID"),
+                "patient_name": row.patient_name if row else str(tags.get("PatientName", "")),
+                "study_date": row.study_date if row else tags.get("StudyDate"),
+                "modality": row.modality if row else tags.get("Modality"),
+                "description": row.description if row else tags.get("StudyDescription") or tags.get("SeriesDescription"),
+            })
+    if notification_studies:
+        background_tasks.add_task(line_bot.notify_upload, notification_studies, user)
     return {"uploaded": results}
 
 @app.get("/api/studies")
