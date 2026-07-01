@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     orthanc_password: str = "orthanc"
 
     keycloak_issuer: str = "http://localhost:8080/realms/dicom"
-    keycloak_allowed_issuers: str = "http://localhost:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom"
+    keycloak_allowed_issuers: str = "http://localhost:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom,http://192.168.1.105:8080/realms/dicom"
     keycloak_jwks_url: str = "http://keycloak:8080/realms/dicom/protocol/openid-connect/certs"
     keycloak_audience: str = "dicom-portal-api"
     keycloak_client_id: str = "dicom-portal"

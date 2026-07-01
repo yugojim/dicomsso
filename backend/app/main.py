@@ -15,6 +15,7 @@ from .orthanc_client import orthanc
 from . import line_bot
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 Base.metadata.create_all(bind=engine)
 
@@ -79,14 +80,18 @@ async def line_webhook(request: Request, x_line_signature: str | None = Header(d
     payload = await request.json()
     for event in payload.get("events", []):
         source = event.get("source", {})
-        logger.info(
+        source_type = source.get("type")
+        group_id = source.get("groupId")
+        room_id = source.get("roomId")
+        user_id = source.get("userId")
+        logger.warning(
             "LINE webhook event source: type=%s groupId=%s roomId=%s userId=%s",
-            source.get("type"),
-            source.get("groupId"),
-            source.get("roomId"),
-            source.get("userId"),
+            source_type,
+            group_id,
+            room_id,
+            user_id,
         )
-    return {"ok": True}
+    return {"ok": True, "events": len(payload.get("events", []))}
 
 
 def normalize_upload_results(payload: Any) -> list[dict[str, Any]]:

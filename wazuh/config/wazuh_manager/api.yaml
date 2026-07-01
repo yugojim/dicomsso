@@ -1,0 +1,6 @@
+# Local portal demo settings for the Wazuh Manager API.
+# The dashboard health-check can issue many requests during startup/reload.
+access:
+  max_login_attempts: 1000
+  block_time: 60
+  max_request_per_minute: 6000

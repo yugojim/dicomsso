@@ -41,7 +41,7 @@ services:
       ORTHANC_USERNAME: orthanc
       ORTHANC_PASSWORD: orthanc
       KEYCLOAK_ISSUER: http://localhost:8080/realms/dicom
-      KEYCLOAK_ALLOWED_ISSUERS: http://localhost:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom
+      KEYCLOAK_ALLOWED_ISSUERS: http://localhost:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom,http://192.168.1.105:8080/realms/dicom
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/dicom/protocol/openid-connect/certs
       KEYCLOAK_CLIENT_ID: dicom-portal
       KEYCLOAK_AUDIENCE: dicom-portal-api
