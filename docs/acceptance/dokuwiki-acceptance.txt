@@ -1,0 +1,110 @@
+====== DICOM Customer Portal 功能與驗收表 ======
+
+===== 1. 系統範圍 =====
+
+本系統提供 DICOM 客戶影像上傳入口，整合 SSO 登入、租戶資料歸屬、Orthanc 儲存、OHIF 檢視、LINE 通知，以及選配 Wazuh 監控。
+
+目前驗收環境：
+
+  * 主入口：''http://192.168.1.105:8088''
+  * Keycloak：''http://192.168.1.105:8080''
+  * Orthanc 管理：''http://192.168.1.105:8042''
+  * OHIF：''http://192.168.1.105:3000''
+  * Wazuh Dashboard：''http://192.168.1.105:5601''
+
+===== 2. 功能清單 =====
+
+^ 編號 ^ 功能模組 ^ 功能說明 ^ 主要路徑 / 服務 ^ 備註 ^
+| F-01 | 客戶入口首頁 | 提供 DICOM Portal 操作首頁、登入/登出、上傳入口與影像清單。 | ''frontend'', ''nginx'' | 主入口為 ''8088''。 |
+| F-02 | SSO 登入 | 使用 Keycloak OpenID Connect 登入，取得 access token。 | ''keycloak'', ''frontend/app.js'' | IP 更換時需確認 redirect URI 與 issuer。 |
+| F-03 | 帳號資訊 | 登入後呼叫 ''/api/me'' 顯示 username、email、tenant_id、roles。 | ''backend /api/me'' | 驗證 token issuer 與角色。 |
+| F-04 | DICOM 上傳 | 支援上傳 ''.dcm'', ''.dicom'', ''.zip'' 檔案。 | ''backend /api/upload'' | 成功後寫入 Orthanc 與資料庫。 |
+| F-05 | 租戶資料歸屬 | 上傳資料會記錄上傳者與 tenant_id。 | ''postgres'', ''backend'' | 非 admin 僅能看授權租戶資料。 |
+| F-06 | 影像清單 | 顯示已上傳影像與 study metadata。 | ''backend /api/studies'' | 可重新整理列表。 |
+| F-07 | OHIF 檢視 | 從影像清單開啟 OHIF Viewer 檢視 DICOM study。 | ''ohif'', ''orthanc'', ''nginx'' | 使用目前 host 組成 viewer URL。 |
+| F-08 | Orthanc 管理 | 管理員可進入 Orthanc 管理介面。 | ''http://192.168.1.105:8042'' | 需 admin role。 |
+| F-09 | Wazuh 監控入口 | 管理員可進入 Wazuh Dashboard 查看監控資訊。 | ''http://192.168.1.105:5601'' | 選配功能，不影響主流程。 |
+| F-10 | Wazuh API 授權 | Portal 透過 backend 授權 Wazuh proxy。 | ''/api/auth/wazuh'' | 需 ''wazuh-admin'' 或 ''wazuh-readonly''。 |
+| F-11 | LINE Webhook | 接收 LINE webhook，記錄來源 type/groupId/userId。 | ''/api/line/webhook'' | 需公開網址給 LINE 呼叫。 |
+| F-12 | LINE 上傳通知 | DICOM 上傳成功後推播通知到 LINE 群組。 | ''backend/app/line_bot.py'' | 需設定 access token 與 groupId。 |
+| F-13 | Wazuh 分離啟動 | Wazuh 可獨立啟停，不影響 DICOM Portal 主功能。 | ''docker-compose.wazuh.yml'' | 建議展示監控時再啟動。 |
+
+===== 3. 驗收表格 =====
+
+^ 編號 ^ 驗收項目 ^ 操作步驟 ^ 預期結果 ^ 狀態 ^
+| A-01 | 啟動主系統 | 執行 ''docker compose up -d''。 | ''postgres'', ''orthanc'', ''keycloak'', ''backend'', ''ohif'', ''frontend'' 均為 running。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-02 | 開啟入口 | 瀏覽 ''http://192.168.1.105:8088''。 | 顯示 DICOM Portal 首頁。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-03 | SSO 登入 | 點選 SSO 登入並輸入測試帳號。 | 成功返回 Portal。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-04 | 帳號資訊 | 登入後查看帳號資訊區塊。 | ''/api/me'' 回傳 username、tenant_id、roles，不出現 401。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-05 | Token issuer | 使用 IP 登入後呼叫 ''/api/me''。 | 不出現 ''Invalid token issuer''。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-06 | 上傳 DICOM | 選擇一個 ''.dcm'' 檔案並上傳。 | 上傳成功，回傳 Orthanc instance/study 資訊。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-07 | 影像清單 | 上傳後重新整理影像清單。 | 新 study 出現在清單中。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-08 | OHIF 檢視 | 從清單開啟 OHIF。 | OHIF 可載入該 study。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-09 | Orthanc 權限 | 非 admin 開啟 ''8042''。 | 被拒絕或導回 Portal。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-10 | Orthanc 管理 | admin 開啟 ''8042''。 | 可進入 Orthanc 管理頁。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-11 | 啟動 Wazuh | 執行 Wazuh compose 啟動命令。 | ''wazuh-indexer'', ''wazuh-manager'', ''wazuh-dashboard'' running。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-12 | Wazuh Dashboard | 開啟 ''http://192.168.1.105:5601''。 | Dashboard 可載入 Overview。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-13 | Wazuh 429 | 進入 Wazuh health check。 | 不再出現 ''429'' 或 ''Error 3002''。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-14 | 停用 Wazuh | 停止 Wazuh 三個服務。 | DICOM Portal 仍可登入、上傳、檢視。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-15 | LINE Webhook | 在 LINE 群組傳訊息給 bot。 | backend log 顯示 ''type=group groupId=...''。 | □ 未測 / □ 通過 / □ 失敗 |
+| A-16 | LINE 通知 | 設定 ''LINE_GROUP_ID'' 後上傳 DICOM。 | LINE 群組收到上傳通知。 | □ 未測 / □ 通過 / □ 失敗 |
+
+===== 4. 主要命令 =====
+
+啟動主系統：
+
+<code bash>
+docker compose up -d
+</code>
+
+重建 backend：
+
+<code bash>
+docker compose up -d --build backend
+</code>
+
+查看服務狀態：
+
+<code bash>
+docker compose ps
+</code>
+
+查看 backend log：
+
+<code bash>
+docker compose logs -f backend
+</code>
+
+啟動 Wazuh：
+
+<code bash>
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up -d wazuh-indexer wazuh-manager wazuh-dashboard
+</code>
+
+停止 Wazuh：
+
+<code bash>
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml stop wazuh-dashboard wazuh-manager wazuh-indexer
+</code>
+
+檢查 Wazuh API 設定：
+
+<code bash>
+docker exec dicom-customer-portal-wazuh-manager-1 cat /var/ossec/api/configuration/api.yaml
+</code>
+
+檢查 Wazuh agent：
+
+<code bash>
+docker exec dicom-customer-portal-wazuh-manager-1 /var/ossec/bin/agent_control -l
+</code>
+
+===== 5. 已知限制 =====
+
+  * ''localhost'' 與 ''192.168.1.105'' 在瀏覽器中是不同網站，cookie、localStorage、session 不共用。
+  * 測試時建議固定使用同一個入口，不要混用 localhost 與 IP。
+  * IP 更換後需同步 Keycloak redirect URI、backend allowed issuers、nginx proxy 設定。
+  * LINE Webhook 必須使用 LINE 官方可連線的公開網址；區網 IP 無法直接作為 LINE webhook URL。
+  * Wazuh 是選配監控服務，啟動較慢且資源需求較高，不建議阻塞 DICOM Portal 主流程驗收。
+  * Wazuh 預設會對 manager 自己執行 SCA、FIM、rootcheck、syscollector 等檢查，這不是 DICOM 檔案掃描。
+
