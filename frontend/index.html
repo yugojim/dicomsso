@@ -17,9 +17,10 @@
     </a>
     <nav class="actions" aria-label="系統操作">
       <a id="keycloakAdminLink" class="admin-link" href="http://localhost:8080/admin/master/console/#/dicom" target="_blank" rel="noopener" hidden>Keycloak 管理</a>
-      <a id="orthancAdminLink" class="admin-link" href="http://localhost:8042/app/explorer.html" target="_blank" rel="noopener" hidden>Orthanc 管理</a>
-      <a id="wazuhLink" class="admin-link" href="http://localhost:5601/" target="_blank" rel="noopener" hidden>Wazuh</a>
+      <a id="orthancAdminLink" class="admin-link" href="http://localhost:18042/app/explorer.html" target="_blank" rel="noopener" hidden>Orthanc 管理</a>
+      <a id="wazuhLink" class="admin-link" href="http://localhost:15601/" target="_blank" rel="noopener" hidden>Wazuh</a>
       <button id="loginBtn">SSO 登入</button>
+      <button id="registerBtn" class="secondary">註冊帳號</button>
       <button id="logoutBtn" class="secondary" hidden>登出</button>
     </nav>
   </header>
@@ -95,6 +96,6 @@
     </section>
   </main>
 
-  <script src="/app.js?v=20260618-pkce-fallback"></script>
+  <script src="/app.js?v=20260710-registration"></script>
 </body>
 </html>

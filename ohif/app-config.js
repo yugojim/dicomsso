@@ -2,7 +2,9 @@ const host = window.location.hostname;
 const scheme = window.location.protocol;
 const keycloakUrl = `${scheme}//${host}:8080`;
 const portalUrl = `${scheme}//${host}:8088`;
-const ohifUrl = `${scheme}//${host}:3000`;
+const ohifUrl = `${scheme}//${host}:13000`;
+const accessToken = new URLSearchParams(window.location.search).get('token');
+const requestHeaders = accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
 
 window.config = {
   routerBasename: '/',
@@ -37,6 +39,7 @@ window.config = {
         omitQuotationForMultipartRequest: true,
         requestOptions: {
           requestFromBrowser: true,
+          headers: requestHeaders,
         },
       },
     ],
@@ -58,6 +61,10 @@ window.config = {
         supportsFuzzyMatching: false,
         supportsWildcard: false,
         omitQuotationForMultipartRequest: true,
+        requestOptions: {
+          requestFromBrowser: true,
+          headers: requestHeaders,
+        },
       },
     },
   ],

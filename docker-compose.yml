@@ -8,7 +8,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "15432:5432"
 
   orthanc:
     image: jodogne/orthanc-plugins
@@ -19,7 +19,7 @@ services:
       - ./orthanc/orthanc.json:/etc/orthanc/orthanc.json:ro
       - orthanc_data:/var/lib/orthanc/db
     ports:
-      - "4242:4242"
+      - "14242:4242"
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
@@ -41,13 +41,13 @@ services:
       ORTHANC_USERNAME: orthanc
       ORTHANC_PASSWORD: orthanc
       KEYCLOAK_ISSUER: http://localhost:8080/realms/dicom
-      KEYCLOAK_ALLOWED_ISSUERS: http://localhost:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom,http://192.168.1.105:8080/realms/dicom
+      KEYCLOAK_ALLOWED_ISSUERS: http://localhost:8080/realms/dicom,http://192.168.1.122:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom,http://192.168.1.105:8080/realms/dicom
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/dicom/protocol/openid-connect/certs
       KEYCLOAK_CLIENT_ID: dicom-portal
       KEYCLOAK_AUDIENCE: dicom-portal-api
       TENANT_CLAIM: tenant_id
       CORS_ORIGIN: http://localhost:8088
-      OHIF_VIEWER_URL: http://localhost:3000/viewer
+      OHIF_VIEWER_URL: http://localhost:13000/viewer
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
       LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
       LINE_GROUP_ID: ${LINE_GROUP_ID:-}
@@ -56,7 +56,7 @@ services:
       - orthanc
       - keycloak
     ports:
-      - "8000:8000"
+      - "18000:8000"
 
   ohif:
     image: ohif/viewer:latest
@@ -67,7 +67,7 @@ services:
       - orthanc
       - frontend
     ports:
-      - "3000:80"
+      - "13000:80"
 
   frontend:
     image: nginx:1.27-alpine
@@ -78,9 +78,10 @@ services:
       - backend
       - orthanc
     ports:
+      - "80:80"
       - "8088:80"
-      - "8042:8042"
-      - "5601:5601"
+      - "18042:8042"
+      - "15601:5601"
 
 volumes:
   postgres_data:

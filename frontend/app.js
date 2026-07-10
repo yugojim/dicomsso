@@ -2,14 +2,15 @@ const currentHost = window.location.hostname;
 const appScheme = window.location.protocol;
 const apiBase = window.location.origin;
 const keycloakBase = `${appScheme}//${currentHost}:8080`;
-const ohifBase = `${appScheme}//${currentHost}:3000`;
-const orthancAdminBase = `${appScheme}//${currentHost}:8042`;
-const wazuhBase = `${appScheme}//${currentHost}:5601`;
+const ohifBase = `${appScheme}//${currentHost}:13000`;
+const orthancAdminBase = `${appScheme}//${currentHost}:18042`;
+const wazuhBase = `${appScheme}//${currentHost}:15601`;
 const realm = "dicom";
 const clientId = "dicom-portal";
 const redirectUri = window.location.origin + window.location.pathname;
 
 const authUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/auth`;
+const registrationUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/registrations`;
 const tokenUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/token`;
 const logoutUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/logout`;
 const loginTtlMs = 20 * 60 * 1000;
@@ -169,6 +170,10 @@ function hasRole(role) {
   }
 }
 
+function hasAnyRole(...roles) {
+  return roles.some(role => hasRole(role));
+}
+
 async function openOhif(url) {
   if (!isAuthenticated()) return alert("請先登入");
   await ensureToken();
@@ -184,7 +189,7 @@ function buildOhifUrl(url) {
   return viewerUrl.toString();
 }
 
-async function login() {
+async function startAuth(targetUrl = authUrl) {
   const codeVerifier = randomString(96);
   const codeChallenge = base64UrlEncode(await sha256(codeVerifier));
   const state = randomString(32);
@@ -200,7 +205,15 @@ async function login() {
     code_challenge: codeChallenge,
     code_challenge_method: "S256"
   });
-  window.location.href = `${authUrl}?${params.toString()}`;
+  window.location.href = `${targetUrl}?${params.toString()}`;
+}
+
+async function login() {
+  await startAuth();
+}
+
+async function registerAccount() {
+  await startAuth(registrationUrl);
 }
 
 async function handleCallbackIfNeeded() {
@@ -366,6 +379,7 @@ function updateButtons() {
   $("orthancAdminLink").href = `${orthancAdminBase}/app/explorer.html`;
   $("wazuhLink").href = `${wazuhBase}/`;
   $("loginBtn").hidden = isAuthenticated();
+  $("registerBtn").hidden = isAuthenticated();
   $("logoutBtn").hidden = !isAuthenticated();
   $("keycloakAdminLink").hidden = !isAuthenticated() || !hasRole("admin");
   $("orthancAdminLink").hidden = !isAuthenticated() || !hasRole("admin");
@@ -379,8 +393,19 @@ async function init() {
     if (isAuthenticated()) {
       saveTokenCookie();
       const claims = decodeJwt(tokenSet.access_token);
-      $("me").textContent = pretty({ login: claims.preferred_username, tenant_id: claims.tenant_id, roles: claims.realm_access?.roles || [] });
+      const roles = claims.realm_access?.roles || [];
+      $("me").textContent = pretty({ login: claims.preferred_username, tenant_id: claims.tenant_id, roles });
       await loadMe();
+      if (!hasAnyRole("viewer", "uploader", "admin", "wazuh-admin", "wazuh-readonly")) {
+        $("me").textContent = pretty({
+          login: claims.preferred_username,
+          tenant_id: claims.tenant_id || claims.preferred_username || claims.sub,
+          roles,
+          status: "待管理者審核，尚未開通影像功能"
+        });
+        $("studyRows").innerHTML = '<tr><td colspan="8">帳號待管理者審核，尚未開通影像功能</td></tr>';
+        return;
+      }
       await loadStudies();
     }
   } catch (e) {
@@ -395,6 +420,7 @@ async function init() {
 }
 
 $("loginBtn").onclick = login;
+$("registerBtn").onclick = registerAccount;
 $("logoutBtn").onclick = logout;
 $("uploadBtn").onclick = uploadFiles;
 $("refreshBtn").onclick = loadStudies;

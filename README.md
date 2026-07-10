@@ -1,7 +1,7 @@
 # DICOM 客戶網站：帳號、上傳、清單、SSO 權限
 
 這是一個最小可行版本（MVP）專案骨架，用於建立客戶 DICOM 上傳入口。
-
+docker compose -f docker-compose.yml -f docker-compose.wazuh.yml stop wazuh-dashboard wazuh-manager wazuh-indexer
 ## 功能
 
 - Keycloak SSO 登入
@@ -58,46 +58,100 @@ docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up --build
 ```text
 客戶入口：http://localhost:8088
 Keycloak：http://localhost:8080
-Orthanc 管理入口：http://localhost:8042
-OHIF：http://localhost:3000
-Wazuh 入口：http://localhost:5601
-Backend API：http://localhost:8000/docs
+Orthanc 管理入口：http://localhost:18042
+OHIF：http://localhost:13000
+Wazuh 入口：http://localhost:15601
+Backend API：http://localhost:18000/docs
 ```
+
+### Port 對照
+
+為了避免和本機常見服務衝突，compose 只保留 Keycloak 的 `8080` 與客戶入口的 `8088`，其他服務改用高位 host port。
+Docker 內部服務仍使用原本 container port，不影響容器之間通訊。
+
+| 服務 | Host port | Container port | 說明 |
+| --- | ---: | ---: | --- |
+| Frontend / 客戶入口 | `8088` | `80` | 客戶登入、上傳、清單 |
+| Keycloak | `8080` | `8080` | SSO 與管理後台 |
+| Backend API | `18000` | `8000` | FastAPI / Swagger |
+| Orthanc 管理代理 | `18042` | `8042` | 經 Nginx 權限保護 |
+| OHIF | `13000` | `80` | Viewer |
+| Orthanc DICOM | `14242` | `4242` | DICOM C-STORE 等 |
+| PostgreSQL | `15432` | `5432` | 本機 debug 用 |
+| Wazuh Dashboard 代理 | `15601` | `5601` | 經 Nginx 權限保護 |
+| Wazuh Indexer | `19200` | `9200` | debug 用 |
+| Wazuh Manager API | `55001` | `55000` | debug 用 |
+| Wazuh agent | `11514` | `1514` | agent event |
+| Wazuh enrollment | `11515` | `1515` | agent enrollment |
+| Wazuh syslog | `5514/udp` | `514/udp` | syslog |
+
+### Port 使用方式
+
+一般日常使用只需要開這幾個網址：
+
+```text
+客戶使用者入口      http://localhost:8088
+Keycloak 管理後台   http://localhost:8080/admin
+Orthanc 管理入口    http://localhost:18042
+OHIF Viewer         http://localhost:13000
+Wazuh Dashboard     http://localhost:15601
+```
+
+開發與除錯時才需要直接使用這些 port：
+
+```text
+Backend Swagger     http://localhost:18000/docs
+PostgreSQL          localhost:15432
+Wazuh Indexer       https://localhost:19200
+Wazuh Manager API   https://localhost:55001
+Orthanc DICOM       localhost:14242
+```
+
+Wazuh agent 連線請使用這些 host port：
+
+```text
+Agent event         localhost:11514
+Agent enrollment    localhost:11515
+Syslog UDP          localhost:5514
+```
+
+不要再使用舊的 host port `3000`、`5601`、`8042`、`8000`。這些已改成 `13000`、`15601`、`18042`、`18000`，用來避免和本機其他服務衝突。
 
 若從同一個 LAN 以固定 IP 存取，也可以把 `localhost` 換成伺服器 IP，例如：
 
 ```text
 客戶入口：http://192.168.1.112:8088
 Keycloak：http://192.168.1.112:8080
-Orthanc 管理入口：http://192.168.1.112:8042
-OHIF：http://192.168.1.112:3000
-Wazuh 入口：http://192.168.1.112:5601
+Orthanc 管理入口：http://192.168.1.112:18042
+OHIF：http://192.168.1.112:13000
+Wazuh 入口：http://192.168.1.112:15601
 ```
 
-`http://localhost:8042` 不是直接暴露 Orthanc，而是經由 Nginx 保護的 Orthanc 管理入口。
+`http://localhost:18042` 不是直接暴露 Orthanc，而是經由 Nginx 保護的 Orthanc 管理入口。
 請先到 `http://localhost:8088` 用具備 `admin` role 的 Keycloak 帳號登入，再開啟 Orthanc 管理入口。
 未登入或非 admin 使用者會被導回客戶入口。
 
-`http://localhost:5601` 是經由 Nginx 保護的 Wazuh Dashboard 入口。使用者必須先在
+`http://localhost:15601` 是經由 Nginx 保護的 Wazuh Dashboard 入口。使用者必須先在
 `http://localhost:8088` 登入，並具備 `admin`、`wazuh-admin` 或 `wazuh-readonly` 其中一種 role。
 Wazuh stack 預設不會跟主系統一起啟動，請見「Wazuh 整合」。
 
-如果啟動時看到 `listen tcp 0.0.0.0:3000: bind: address already in use`，代表本機已經有其他程式佔用
-OHIF 使用的 `3000` port。可先查詢並停止佔用者：
+如果啟動時看到 `bind: address already in use`，代表本機已有其他程式佔用對應 port。
+目前 compose 避開常見 port，主要對外 port 是 `8088`, `8080`, `18042`, `13000`, `15601`, `18000`。
+可先查詢並停止佔用者：
 
 ```bash
-lsof -nP -iTCP:3000 -sTCP:LISTEN
+lsof -nP -iTCP:<PORT> -sTCP:LISTEN
 kill <PID>
 ```
 
-或將 `docker-compose.yml` 內 OHIF 的 port 改成其他值，例如 `3002:80`，並同步調整 backend 的
+或將 `docker-compose.yml` 內對應服務的左側 host port 改成其他值，並同步調整前端連結或
 `OHIF_VIEWER_URL`。
 
 如果登入後看到 `/api/me failed: 502 Bad Gateway`，通常是 backend 容器重建後，frontend Nginx
 仍連到舊的 backend container IP。先確認 backend 本身正常：
 
 ```bash
-curl -s -D - http://localhost:8000/docs
+curl -s -D - http://localhost:18000/docs
 ```
 
 若 backend 回 `200 OK`，重啟 frontend 讓 Nginx 重新解析 backend：
@@ -198,6 +252,48 @@ wazuh-readonly 可進入 Wazuh，並映射為 Wazuh read-only
 
 每個一般客戶使用者都必須設定 `tenant_id` 屬性。Backend 會從 access token 的 `tenant_id`
 claim 判斷資料歸屬；沒有 `admin` role 的使用者只會看到同一個 `tenant_id` 的影像。
+
+### 使用者自行註冊與管理者審核
+
+入口網站提供「註冊帳號」按鈕，會導到 Keycloak `dicom` realm 的註冊畫面。
+新使用者可以自己建立帳號，但預設沒有 `viewer`、`uploader`、`admin` 等業務 role。
+登入後若尚未核准，入口網站會顯示「帳號待管理者審核，尚未開通影像功能」。
+
+管理者審核流程：
+
+1. 開啟 `http://localhost:8080/admin`。
+2. 使用 Keycloak 管理帳號登入，並切換到 `dicom` realm。
+3. 到 `Users` 找到新註冊的使用者。
+4. 在 `Details` 設定 `tenant_id`，例如 `tenant-a`。
+5. 到 `Role mapping` → `Assign role`，指派需要的 realm roles。
+
+常見核准方式：
+
+```text
+只看影像：viewer
+可上傳影像：viewer, uploader
+一般管理者：admin, viewer, uploader
+Wazuh 管理者：admin, viewer, uploader, wazuh-admin
+Wazuh 唯讀：wazuh-readonly
+```
+
+Keycloak realm 匯入檔已設定 `registrationAllowed: true`。如果環境已經跑過，修改
+`keycloak/realm-dicom.json` 不會自動覆蓋既有 realm，需要用管理後台開啟，或執行：
+
+```bash
+docker exec dicomsso-keycloak-1 /opt/keycloak/bin/kcadm.sh \
+  config credentials \
+  --server http://localhost:8080 \
+  --realm master \
+  --user admin \
+  --password admin
+
+docker exec dicomsso-keycloak-1 /opt/keycloak/bin/kcadm.sh \
+  update realms/dicom \
+  -s registrationAllowed=true \
+  -s registrationEmailAsUsername=false \
+  -s rememberMe=true
+```
 
 ### 使用 Keycloak 管理後台
 
@@ -369,7 +465,7 @@ docker exec dicom-customer-portal-keycloak-1 /opt/keycloak/bin/kcadm.sh \
 https://<公開網域>/api/line/webhook
 ```
 
-本機開發時可用 ngrok 或其他 tunnel 將 backend 的 `8000` port 暴露出去。群組內傳任一則訊息後，backend log 會印出：
+本機開發時可用 ngrok 或其他 tunnel 將 backend 對外的 `18000` port 暴露出去。群組內傳任一則訊息後，backend log 會印出：
 
 ```text
 LINE webhook event source: type=group groupId=<LINE_GROUP_ID> ...
@@ -502,7 +598,7 @@ docker compose -f docker-compose.yml -f docker-compose.wazuh.yml logs -f wazuh-c
 wazuh-certs-generator  產生憑證後 Exited，這是正常狀態
 wazuh-indexer          OpenSearch / indexer 啟動
 wazuh-manager          出現 Completed.、Started wazuh-apid、Connection to backoff(...) established
-wazuh-dashboard        出現 Server running at https://0.0.0.0:5601
+wazuh-dashboard        出現 Server running at https://0.0.0.0:5601（容器內部 port；對外入口是 15601）
 ```
 
 停止主系統加 Wazuh：
@@ -518,11 +614,11 @@ containers。要一併清理不再屬於目前 compose 組合的舊容器，可�
 docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up --build --remove-orphans
 ```
 
-如果 OHIF 啟動失敗並出現 `listen tcp 0.0.0.0:3000: bind: address already in use`，表示本機已有其他程式
-佔用 `3000`。可先查詢：
+如果服務啟動失敗並出現 `bind: address already in use`，表示本機已有其他程式佔用對應 host port。
+目前 OHIF 對外使用 `13000`。可先查詢：
 
 ```bash
-lsof -nP -iTCP:3000 -sTCP:LISTEN
+lsof -nP -iTCP:<PORT> -sTCP:LISTEN
 ```
 
 再停止該行程：
@@ -531,13 +627,13 @@ lsof -nP -iTCP:3000 -sTCP:LISTEN
 kill <PID>
 ```
 
-若該行程不能停止，請改用其他 OHIF port，例如在 `docker-compose.yml` 將 `ohif` 的 `3000:80`
-改為 `3002:80`，並把 backend 的 `OHIF_VIEWER_URL` 改為 `http://localhost:3002/viewer`。
+若該行程不能停止，請改用其他 host port，例如在 `docker-compose.yml` 將 `ohif` 的 `13000:80`
+改為 `13002:80`，並把 backend 的 `OHIF_VIEWER_URL` 改為 `http://localhost:13002/viewer`。
 
 如果入口網站顯示 `/api/me failed: 502 Bad Gateway`，而 backend API 本身可開啟：
 
 ```bash
-curl -s -D - http://localhost:8000/docs
+curl -s -D - http://localhost:18000/docs
 ```
 
 表示 frontend Nginx 可能仍快取舊的 backend container IP。重啟 frontend 即可重新解析：
@@ -576,7 +672,7 @@ docker exec dicom-customer-portal-wazuh-dashboard-1 sh -c 'TOKEN=$(curl -sk -u w
 開啟：
 
 ```text
-http://localhost:5601
+http://localhost:15601
 ```
 
 此入口由本專案 Nginx 先呼叫 backend 驗證 Keycloak cookie，通過後由 backend 回傳對應的
@@ -669,20 +765,20 @@ docker-compose.yml
 清單 API 會產生：
 
 ```text
-http://localhost:3000/viewer/<StudyInstanceUID>
+http://localhost:13000/viewer/<StudyInstanceUID>
 ```
 
 本機開發環境會啟動 OHIF viewer，並透過 frontend Nginx 將 `http://localhost:8088/dicom-web/`
 代理到 Orthanc DICOMweb。DICOMweb / WADO 入口會先呼叫 backend 驗證 Keycloak Bearer token，
 使用者必須具備 `viewer` role 才能讀取影像；Nginx 只會在通過驗證後，於內部補 Orthanc basic auth。
 
-Orthanc 管理 UI 也透過 frontend Nginx 暴露在 `http://localhost:8042`，每個請求都會先呼叫
+Orthanc 管理 UI 也透過 frontend Nginx 暴露在 `http://localhost:18042`，每個請求都會先呼叫
 backend 驗證 Keycloak token，且使用者必須具備 `admin` role。真正的 Orthanc HTTP port 不直接暴露到 host。
 
 OHIF viewer 本機開發網址：
 
 ```text
-http://localhost:3000
+http://localhost:13000
 ```
 
 正式環境建議改成：
