@@ -1,0 +1,41 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/hapi
+    username: dicom
+    password: dicom
+    driverClassName: org.postgresql.Driver
+    max-active: 15
+  jpa:
+    properties:
+      hibernate.dialect: ca.uhn.fhir.jpa.model.dialect.HapiFhirPostgresDialect
+      hibernate.search.enabled: false
+
+server:
+  # 讓 HAPI 依 nginx 帶進來的 X-Forwarded-* 推導 FHIR base URL，
+  # 這樣 localhost 與 192.168.x.x 兩種進入點都會產生正確的 fullUrl。
+  forward-headers-strategy: framework
+
+hapi:
+  fhir:
+    fhir_version: R4
+    # 不設 server_address，改由 X-Forwarded-* 推導。
+    allow_external_references: true
+    allow_multiple_delete: true
+    # HAPI 本身不驗證 token，授權一律由 nginx auth_request + backend /api/auth/fhir 把關，
+    # 因此 hapi-fhir 容器不對外開 port，只允許同一個 docker network 內的 nginx 連線。
+    cors:
+      allow_Credentials: true
+      allowed_origin:
+        - '*'
+    tester:
+      home:
+        name: DICOM Portal FHIR Server
+        # 這個 server_address 是「測試頁的 Java 程式自己要連的位址」，不是給瀏覽器用的。
+        # 測試頁是 server-side 呼叫：容器內看不到 host 的 18090，填對外網址會得到 Connection refused，
+        # 填 nginx 閘道（http://frontend:8090/fhir）則因為沒有 token 會被擋成 401。
+        # 所以只能指向容器自己的 8080。也因為這條路徑繞過了 nginx 的角色檢查，
+        # 測試頁本身在 nginx 只開放給 fhir-admin（見 nginx/default.conf 的 8090 server 區塊）。
+        # 對外可用的 FHIR base 仍然是 http://<host>:18090/fhir。
+        server_address: http://localhost:8080/fhir
+        refuse_to_fetch_third_party_urls: false
+        fhir_version: R4

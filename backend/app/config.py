@@ -20,5 +20,6 @@ class Settings(BaseSettings):
     line_channel_access_token: str = ""
     line_channel_secret: str = ""
     line_group_id: str = ""
+    line_coupon_id: str = ""
 
 settings = Settings()

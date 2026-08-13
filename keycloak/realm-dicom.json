@@ -16,7 +16,9 @@
       { "name": "uploader", "description": "Can upload DICOM files" },
       { "name": "admin", "description": "Portal administrator" },
       { "name": "wazuh-admin", "description": "Can access Wazuh as an administrator" },
-      { "name": "wazuh-readonly", "description": "Can access Wazuh as a read-only user" }
+      { "name": "wazuh-readonly", "description": "Can access Wazuh as a read-only user" },
+      { "name": "fhir-user", "description": "Can read FHIR resources on the HAPI FHIR server" },
+      { "name": "fhir-admin", "description": "Can read and write FHIR resources on the HAPI FHIR server" }
     ]
   },
   "clients": [
@@ -85,7 +87,7 @@
       "credentials": [
         { "type": "password", "value": "customer-a", "temporary": false }
       ],
-      "realmRoles": ["viewer", "uploader"]
+      "realmRoles": ["viewer", "uploader", "fhir-user"]
     },
     {
       "username": "customer-b",
@@ -99,7 +101,7 @@
       "credentials": [
         { "type": "password", "value": "customer-b", "temporary": false }
       ],
-      "realmRoles": ["viewer", "uploader"]
+      "realmRoles": ["viewer", "uploader", "fhir-user"]
     },
     {
       "username": "portal-admin",
@@ -114,7 +116,7 @@
       "credentials": [
         { "type": "password", "value": "portal-admin", "temporary": false }
       ],
-      "realmRoles": ["admin", "viewer", "uploader", "wazuh-admin"]
+      "realmRoles": ["admin", "viewer", "uploader", "wazuh-admin", "fhir-user", "fhir-admin"]
     }
   ]
 }

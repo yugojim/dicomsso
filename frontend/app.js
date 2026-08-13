@@ -5,6 +5,7 @@ const keycloakBase = `${appScheme}//${currentHost}:8080`;
 const ohifBase = `${appScheme}//${currentHost}:13000`;
 const orthancAdminBase = `${appScheme}//${currentHost}:18042`;
 const wazuhBase = `${appScheme}//${currentHost}:15601`;
+const fhirBase = `${appScheme}//${currentHost}:18090`;
 const realm = "dicom";
 const clientId = "dicom-portal";
 const redirectUri = window.location.origin + window.location.pathname;
@@ -168,6 +169,20 @@ function hasRole(role) {
   } catch (_) {
     return false;
   }
+}
+
+function hasRealmRole(role) {
+  if (!tokenSet?.access_token) return false;
+  try {
+    const claims = decodeJwt(tokenSet.access_token);
+    return (claims.realm_access?.roles || []).includes(role);
+  } catch (_) {
+    return false;
+  }
+}
+
+function hasAnyRealmRole(...roles) {
+  return roles.some(role => hasRealmRole(role));
 }
 
 function hasAnyRole(...roles) {
@@ -374,16 +389,43 @@ async function uploadFiles() {
   await loadStudies();
 }
 
+async function sendLineFormatSamples() {
+  if (!isAuthenticated()) return alert("請先登入");
+  await ensureToken();
+  $("lineFormatBtn").disabled = true;
+  $("uploadResult").textContent = "正在送出 LINE 訊息格式測試...";
+  try {
+    const r = await fetch(`${apiBase}/api/line/send-message-format-samples`, {
+      method: "POST",
+      headers: tokenHeader()
+    });
+    const text = await r.text();
+    let body;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      body = { detail: text || `LINE push failed with HTTP ${r.status}` };
+    }
+    $("uploadResult").textContent = pretty(body);
+    if (!r.ok) throw new Error(`/api/line/send-message-format-samples failed: ${r.status}`);
+  } finally {
+    $("lineFormatBtn").disabled = false;
+  }
+}
+
 function updateButtons() {
   $("keycloakAdminLink").href = `${keycloakBase}/admin/master/console/#/${realm}`;
   $("orthancAdminLink").href = `${orthancAdminBase}/app/explorer.html`;
   $("wazuhLink").href = `${wazuhBase}/`;
+  $("fhirLink").href = `${fhirBase}/`;
   $("loginBtn").hidden = isAuthenticated();
   $("registerBtn").hidden = isAuthenticated();
   $("logoutBtn").hidden = !isAuthenticated();
-  $("keycloakAdminLink").hidden = !isAuthenticated() || !hasRole("admin");
-  $("orthancAdminLink").hidden = !isAuthenticated() || !hasRole("admin");
-  $("wazuhLink").hidden = !isAuthenticated() || !(hasRole("admin") || hasRole("wazuh-admin") || hasRole("wazuh-readonly"));
+  $("keycloakAdminLink").hidden = !isAuthenticated() || !hasRealmRole("admin");
+  $("orthancAdminLink").hidden = !isAuthenticated() || !hasRealmRole("admin");
+  $("wazuhLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "wazuh-admin", "wazuh-readonly");
+  $("fhirLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "fhir-admin", "fhir-user");
+  $("lineFormatBtn").hidden = !isAuthenticated() || !hasRealmRole("admin");
 }
 
 async function init() {
@@ -396,7 +438,7 @@ async function init() {
       const roles = claims.realm_access?.roles || [];
       $("me").textContent = pretty({ login: claims.preferred_username, tenant_id: claims.tenant_id, roles });
       await loadMe();
-      if (!hasAnyRole("viewer", "uploader", "admin", "wazuh-admin", "wazuh-readonly")) {
+      if (!hasAnyRole("viewer", "uploader", "admin", "wazuh-admin", "wazuh-readonly", "fhir-user", "fhir-admin")) {
         $("me").textContent = pretty({
           login: claims.preferred_username,
           tenant_id: claims.tenant_id || claims.preferred_username || claims.sub,
@@ -423,6 +465,7 @@ $("loginBtn").onclick = login;
 $("registerBtn").onclick = registerAccount;
 $("logoutBtn").onclick = logout;
 $("uploadBtn").onclick = uploadFiles;
+$("lineFormatBtn").onclick = sendLineFormatSamples;
 $("refreshBtn").onclick = loadStudies;
 
 init();

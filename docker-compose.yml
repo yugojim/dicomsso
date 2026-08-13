@@ -7,6 +7,7 @@ services:
       POSTGRES_PASSWORD: dicom
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "15432:5432"
 
@@ -51,12 +52,27 @@ services:
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
       LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
       LINE_GROUP_ID: ${LINE_GROUP_ID:-}
+      LINE_COUPON_ID: ${LINE_COUPON_ID:-}
     depends_on:
       - postgres
       - orthanc
       - keycloak
     ports:
       - "18000:8000"
+
+  hapi-fhir:
+    image: hapiproject/hapi:latest
+    environment:
+      # 用 additional-location：保留 image 內建的 application.yaml 預設值，只覆蓋這裡列出的項目。
+      # 若改用 SPRING_CONFIG_LOCATION 會整份取代掉內建設定（例如 spring.flyway.enabled=false），HAPI 會啟動失敗。
+      SPRING_CONFIG_ADDITIONAL_LOCATION: file:///app/config/application.yaml
+    volumes:
+      - ./fhir/application.yaml:/app/config/application.yaml:ro
+    depends_on:
+      - postgres
+    # 不對外開 port：一律經由 frontend nginx:18090 的 Keycloak 授權閘道存取。
+    expose:
+      - "8080"
 
   ohif:
     image: ohif/viewer:latest
@@ -77,11 +93,13 @@ services:
     depends_on:
       - backend
       - orthanc
+      - hapi-fhir
     ports:
       - "80:80"
       - "8088:80"
       - "18042:8042"
       - "15601:5601"
+      - "18090:8090"
 
 volumes:
   postgres_data:

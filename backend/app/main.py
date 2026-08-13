@@ -63,6 +63,35 @@ async def authorize_orthanc_admin(user=Depends(require_role("admin"))):
     return {"ok": True, "username": user["username"], "tenant_id": user["tenant_id"]}
 
 
+FHIR_WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.get("/api/auth/fhir")
+async def authorize_fhir(
+    x_original_method: str | None = Header(default=None),
+    user=Depends(require_role("fhir-user", "fhir-admin")),
+):
+    """nginx auth_request 閘道：HAPI FHIR 前的 Keycloak 授權檢查。
+
+    讀取需要 fhir-user；寫入需要 fhir-admin（require_role 已讓 admin 通吃）。
+    """
+    method = (x_original_method or "GET").upper()
+    if method in FHIR_WRITE_METHODS and not ({"admin", "fhir-admin"} & user["roles"]):
+        raise HTTPException(status_code=403, detail="FHIR write requires the fhir-admin role")
+    return {"ok": True, "username": user["username"], "tenant_id": user["tenant_id"]}
+
+
+@app.get("/api/auth/fhir-ui")
+async def authorize_fhir_ui(user=Depends(require_role("fhir-admin"))):
+    """HAPI 內建測試頁的授權檢查。
+
+    測試頁是 server-side 呼叫 HAPI 自己的 8080，繞得過 nginx 的讀寫檢查，
+    等於在 UI 上可以任意寫入。因此測試頁只開放給本來就有寫入權的 fhir-admin。
+    只有 fhir-user 的帳號請直接用 /fhir REST API。
+    """
+    return {"ok": True, "username": user["username"], "tenant_id": user["tenant_id"]}
+
+
 @app.get("/api/auth/wazuh")
 async def authorize_wazuh(response: Response, user=Depends(require_role("wazuh-admin", "wazuh-readonly"))):
     wazuh_user = "admin" if "admin" in user["roles"] or "wazuh-admin" in user["roles"] else "kibanaro"
@@ -92,6 +121,21 @@ async def line_webhook(request: Request, x_line_signature: str | None = Header(d
             user_id,
         )
     return {"ok": True, "events": len(payload.get("events", []))}
+
+
+@app.post("/api/line/send-message-format-samples")
+async def send_line_message_format_samples(user=Depends(require_role("admin"))):
+    try:
+        result = await line_bot.notify_message_format_samples(user)
+    except Exception as exc:
+        logger.exception("LINE message format sample push failed")
+        raise HTTPException(status_code=502, detail=f"LINE push failed: {exc}")
+    ok = not result.get("skipped") and not result.get("validation_errors")
+    return {
+        "ok": ok,
+        "message": "LINE 訊息格式測試已送出" if ok else "LINE 訊息格式驗證失敗或設定不完整，未送出",
+        **result,
+    }
 
 
 def normalize_upload_results(payload: Any) -> list[dict[str, Any]]:
