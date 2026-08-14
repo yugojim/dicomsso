@@ -16,6 +16,7 @@
 - 客戶只能看到自己 `tenant_id` 底下的資料
 - 清單提供 OHIF URL 欄位，方便後續接 OHIF Viewer
 - 內建 HAPI FHIR server，讀寫權限同樣由 Keycloak role 控管
+- 依衛福部電子病歷交換單張實作指引（EMR IG）建置的 HIS 風格電子病歷交換平台
 
 ## 架構
 
@@ -30,10 +31,11 @@ PostgreSQL：記錄 tenant_id 與 Orthanc resource id
   ↓
 Orthanc：儲存 DICOM
 
-另一條路徑：
-Browser / FHIR client
+另一條路徑（電子病歷）：
+Browser（/his/ 電子病歷交換平台）或外部 FHIR client
   ↓ Bearer token 或 kc_token cookie
-Nginx :18090（auth_request → FastAPI /api/auth/fhir 驗 Keycloak role）
+Nginx（同源 :8088/fhir 或對外 :18090）
+  ↓ auth_request → FastAPI /api/auth/fhir 驗 Keycloak role 與讀寫
   ↓
 HAPI FHIR Server（不對外開 port）
   ↓
@@ -80,6 +82,7 @@ Orthanc 管理入口：http://localhost:18042
 OHIF：http://localhost:13000
 Wazuh 入口：http://localhost:15601
 HAPI FHIR：http://localhost:18090/fhir
+電子病歷交換平台：http://localhost:8088/his/
 Backend API：http://localhost:18000/docs
 ```
 
@@ -115,6 +118,7 @@ Keycloak 管理後台   http://localhost:8080/admin
 Orthanc 管理入口    http://localhost:18042
 OHIF Viewer         http://localhost:13000
 Wazuh Dashboard     http://localhost:15601
+電子病歷交換平台    http://localhost:8088/his/
 HAPI FHIR Server    http://localhost:18090（FHIR base：http://localhost:18090/fhir）
 ```
 
@@ -147,6 +151,7 @@ Orthanc 管理入口：http://192.168.1.112:18042
 OHIF：http://192.168.1.112:13000
 Wazuh 入口：http://192.168.1.112:15601
 HAPI FHIR：http://192.168.1.112:18090/fhir
+電子病歷交換平台：http://192.168.1.112:8088/his/
 ```
 
 `http://localhost:18042` 不是直接暴露 Orthanc，而是經由 Nginx 保護的 Orthanc 管理入口。
@@ -242,6 +247,7 @@ Keycloak admin：
 ```text
 帳號：customer-a
 密碼：customer-a
+email：customer-a@example.local
 tenant_id：tenant-a
 roles：viewer, uploader, fhir-user
 ```
@@ -251,6 +257,7 @@ roles：viewer, uploader, fhir-user
 ```text
 帳號：customer-b
 密碼：customer-b
+email：customer-b@example.local
 tenant_id：tenant-b
 roles：viewer, uploader, fhir-user
 ```
@@ -262,6 +269,52 @@ roles：viewer, uploader, fhir-user
 密碼：portal-admin
 roles：admin, viewer, uploader, wazuh-admin, fhir-user, fhir-admin
 ```
+
+## 登入逾時與閒置登出
+
+登入後不是固定 20 分鐘就踢人，而是以**閒置時間**計算：
+
+```text
+有操作（點擊、鍵盤、捲動、觸控）  → 重新計時 20 分鐘
+閒置滿 18 分鐘                    → 跳出「是否要延長登入時間？」並倒數 120 秒
+按「延長登入時間」                → 換發新 token，重新計時 20 分鐘
+倒數歸零或按「立即登出」          → 自動登出，回到登入畫面
+```
+
+影像上傳入口與電子病歷交換平台共用同一份登入狀態（`localStorage.tokenSet`），
+所以在任一個分頁操作都會一起延長，任一個分頁逾時也會一起登出。
+
+警示跳出後，**滑鼠移動或按鍵不會自動延長**，一定要按按鈕。
+這是刻意的：避免無人看顧的診間電腦被碰到就一直維持登入。
+
+實作位置：
+
+```text
+frontend/session-timeout.js   閒置計時、警示視窗、自動登出（兩個前端共用）
+frontend/app.js               影像入口的接線（onExtend 走 ensureToken(true)）
+frontend/his/his.js           電子病歷平台的接線（onExtend 走 KcAuth.refresh()）
+```
+
+Keycloak realm 對應設定：
+
+```text
+ssoSessionIdleTimeout   1200    伺服器端同樣是閒置 20 分鐘失效
+ssoSessionMaxLifespan   36000   單次登入最長 10 小時（只要持續操作就能一直延長）
+accessTokenLifespan     1200    access token 20 分鐘，前端會在到期前自動換新
+```
+
+`ssoSessionMaxLifespan` 一定要大於 20 分鐘，否則使用者按了「延長」也會因為
+Keycloak 端 session 已達上限而換不到新 token。修改匯入檔後要套用到執行中的環境：
+
+```bash
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
+  --server http://localhost:8080 --realm master --user admin --password admin
+docker compose exec keycloak /opt/keycloak/bin/kcadm.sh update realms/dicom \
+  -s ssoSessionIdleTimeout=1200 -s ssoSessionMaxLifespan=36000
+```
+
+要改成別的秒數，前端改 `frontend/app.js` 與 `frontend/his/his.js` 的
+`idleMs` / `warnMs`，後端改上面兩個 realm 參數，兩邊要一致。
 
 ## Keycloak 新增使用者與賦予權限
 
@@ -546,6 +599,30 @@ files=<DICOM files or ZIP archives>
 3. 讀取 Orthanc 匯入的每個 instance simplified-tags。
 4. 將 Orthanc Study ID、Instance ID、PatientID、StudyInstanceUID 與 `tenant_id` 寫入 PostgreSQL。
 
+### 上傳後影像清單沒有變動？
+
+`/api/upload` 的回應會說明原因。系統對「同一個 Study」只會在清單保留一列：
+
+```text
+record = new       這次真的新增了一筆，影像清單會多一列
+record = existing  這個 Study 在你的租戶底下已經有紀錄，沿用舊資料，清單不會變
+```
+
+判斷依據是資料庫的唯一鍵 `(tenant_id, orthanc_study_id)`。所以：
+
+- 重複上傳同一份 DICOM（或同一個檢查的其他影像）→ 清單不變，這是正常行為。
+- Orthanc 回的 `AlreadyStored` 是「Orthanc 裡已經有這個 instance」，
+  和「清單會不會變」不是同一件事：別的租戶上傳過的檢查，你上傳時 Orthanc 會說 `AlreadyStored`，
+  但你的租戶還沒有紀錄，清單仍然會多一列。
+- 要驗收「新增」流程，請用不同 StudyInstanceUID 的檢查，或先在 Orthanc 管理入口刪掉該 Study 再重傳。
+
+前端上傳結果會直接顯示這段說明，不需要自己讀 JSON。
+
+LINE 通知也跟著這個判斷走：**只有 `record = new` 的檢查會推播**。
+重複上傳同一個 Study 不會再發通知，backend log 會記一行
+`LINE notification skipped: N duplicate study upload(s)`。
+一次上傳整包 ZIP（同一個檢查很多張影像）也只會發一則，不會每張影像各發一次。
+
 ### 查詢自己的影像清單
 
 ```http
@@ -567,6 +644,17 @@ GET /api/auth/wazuh           需要 wazuh-admin / wazuh-readonly；保護 Wazuh
 GET /api/auth/fhir            需要 fhir-user（讀）或 fhir-admin（寫）；保護 /fhir REST API
 GET /api/auth/fhir-ui         需要 fhir-admin；保護 HAPI 內建測試頁
 ```
+
+### 影像歸戶用的 DICOM 查詢
+
+```http
+GET /api/imaging/dicom-studies              需要 fhir-user；Orthanc 檢查清單
+GET /api/imaging/dicom-studies/{orthanc_id} 需要 fhir-user；單筆的 series / instance 明細
+```
+
+回傳的是組 FHIR `ImagingStudy` 需要的 DICOM metadata（Study/Series/SOP Instance UID、
+Modality、檢查時間、DICOM 病人資料、影像張數）。`admin` 與 `fhir-admin` 看得到全院檢查，
+其他角色只看得到自己租戶的。
 
 `/api/auth/fhir` 會讀 Nginx 帶進來的 `X-Original-Method` 判斷這次是讀還是寫，
 `POST` / `PUT` / `PATCH` / `DELETE` 才要求 `fhir-admin`。
@@ -732,6 +820,180 @@ http://192.168.1.112:18090/fhir
 - DICOM study 尚未自動轉成 FHIR `ImagingStudy`。目前兩邊是各自獨立的資料。
 - HAPI 內建測試頁沒有經過 Nginx 的讀寫檢查，目前是用「只給 fhir-admin」規避。若之後要讓 `fhir-user`
   也能用圖形介面查資料，應改成關掉內建測試頁，另外做一個走 `/fhir` REST API 的前端頁面。
+
+## 電子病歷交換平台（FHIR Portal）
+
+依衛生福利部「電子病歷交換單張實作指引（EMR IG）」與 TW Core 建置的 HIS 風格前端，
+帳號與讀寫權限一樣由 Keycloak 控管。
+
+```text
+入口：http://localhost:8088/his/
+規格：https://twcore.mohw.gov.tw/ig/emr/
+```
+
+登入後在客戶入口右上角也會出現「電子病歷交換平台」連結（需要 FHIR role 才看得到）。
+
+### 畫面與功能
+
+```text
+病人主檔    姓名 / 病歷號 / 身分證字號查詢，病人清單
+病歷檢視    病人資訊帶 + 過敏警示 +（臨床總覽／就診紀錄／檢驗檢查／用藥處方／醫療影像／交換單張）
+交換單張    全院 Composition 清單，點入即以 $document 組成 EMR IG 交換 Bundle，可列印、可下載 JSON
+醫療影像    ImagingStudy 清單，可直接跳 OHIF 開圖
+檢驗檢查    全院 Observation(laboratory) 清單，自動標示超出參考值的項目
+伺服器資訊  CapabilityStatement、各資源筆數、目前使用者的 Keycloak role 與 FHIR 權限
+```
+
+每一張卡片、每一列資料都有「FHIR」按鈕，可直接看該筆資源的原始 JSON，方便驗收時對照規格。
+
+### 六種交換單張與 FHIR 資源對照
+
+| EMR IG 單張 | LOINC | 主要 FHIR 資源 | 本系統 |
+| --- | --- | --- | --- |
+| 門診病歷 PMR | 34117-2 | Composition, Encounter, Condition, ClinicalImpression(S/O/A), Procedure, MedicationRequest, Observation, AllergyIntolerance, Coverage | ✅ 可檢視 / 可產生 |
+| 檢驗檢查 IC | 11502-2 | Composition, Observation, Specimen, Encounter, Practitioner | ✅ 可檢視 / 可產生 |
+| 電子處方箋 EP | 57833-6 | Composition, MedicationRequest, Medication, Condition, Coverage | ✅ 可檢視 / 可產生 |
+| 出院病摘 DMS | 18842-5 | Composition, Encounter, Condition, Procedure, CarePlan, Observation | ✅ 可檢視 / 可產生 |
+| 醫療影像及報告 Image | 18748-4 | Composition, ImagingStudy, DiagnosticReport, Observation, Endpoint | ✅ 可檢視（影像接 Orthanc / OHIF） |
+| 調劑單張 DS | — | MedicationDispense 等 | ⬜ 尚未實作 |
+
+所有寫入的資源都會帶 `meta.profile` 指向 EMR IG 的 StructureDefinition，例如
+`https://twcore.mohw.gov.tw/ig/emr/StructureDefinition/PMRComposition`。
+
+### 權限
+
+沿用 HAPI FHIR 的兩個 role，前端與後端各擋一層：
+
+| Role | 平台行為 |
+| --- | --- |
+| 無 FHIR role | 登入後停在閘門畫面，提示請管理者指派角色 |
+| `fhir-user` | 可查詢全部畫面；建檔按鈕不顯示，直接呼叫寫入 API 也會被 Nginx 擋成 403 |
+| `fhir-admin` / `admin` | 可新增病人、開立就診／處方／檢驗、產生交換單張 |
+
+前端隱藏按鈕只是介面行為，真正的權限在 `backend /api/auth/fhir`：
+`GET` 只要 `fhir-user`，`POST/PUT/PATCH/DELETE` 一定要 `fhir-admin`。
+
+### 灌入示範資料
+
+```bash
+python3 fhir/seed/seed_emr.py
+```
+
+會寫入 53 筆符合 EMR IG 的資源（4 位病人、6 張交換單張），用固定 id 以 PUT 寫入，重複執行不會產生重複資料。
+只用 Python 標準函式庫，不需要額外安裝套件。
+
+```text
+王大明  高血壓 + 糖尿病門診：門診病歷、檢驗檢查、電子處方箋三張單張
+李淑芬  胸部 X 光：ImagingStudy + DiagnosticReport + Endpoint（醫療影像及報告單張）
+張家豪  急性闌尾炎住院手術：出院病摘單張
+陳美玲  心臟衰竭慢性病追蹤：門診病歷單張
+```
+
+要換伺服器或改用區網 IP：
+
+```bash
+python3 fhir/seed/seed_emr.py --base http://192.168.1.112:18090/fhir --keycloak http://192.168.1.112:8080
+python3 fhir/seed/seed_emr.py --dry-run     # 只印 JSON 不寫入，可用來對照規格
+```
+
+### 建檔流程
+
+以 `fhir-admin` 登入後：
+
+```text
+新增病人      建立 Patient（身分證 identifier 用 http://www.moi.gov.tw，病歷號用 type=MR）
+新增門診就診  一次 FHIR transaction 建立 Encounter + Condition + ClinicalImpression(S/O/A)
+開立處方      一次 transaction 建立 Medication + MedicationRequest
+登錄檢驗結果  建立含多個 component 的 Observation，超出參考值會自動標紅並標示 H / L
+產生交換單張  蒐集該次就診的資源組成 Composition，再用 $document 匯出交換 Bundle
+```
+
+### 同源 FHIR 入口
+
+Portal 走 `http://localhost:8088/fhir`（與網頁同源，避免瀏覽器 CORS），
+外部系統走 `http://localhost:18090/fhir`。兩條路徑的授權檢查完全相同，
+都是 Nginx `auth_request` → `backend /api/auth/fhir`。
+
+```text
+瀏覽器 /his/  →  同源 /fhir   →  auth_request  →  HAPI FHIR
+外部程式      →  :18090/fhir  →  auth_request  →  HAPI FHIR
+```
+
+### Orthanc 影像如何連動到 FHIR
+
+上傳到 Orthanc 的 DICOM 不會自動變成 FHIR 資源——DICOM 沒有院內病歷號與 FHIR Patient 的對應關係，
+也沒有影像報告，這兩件事一定要有人決定。平台提供「影像歸戶」介面來完成這件事：
+
+```text
+DICOM 上傳 → Orthanc（影像本體）
+                ↓  backend /api/imaging/dicom-studies 讀出 DICOM metadata
+        電子病歷交換平台「影像歸戶」介面
+                ↓  選擇對應病人、填寫檢查與報告
+        FHIR transaction 一次寫入
+                ↓
+   ImagingStudy + DiagnosticReport + Observation + Endpoint（+ Composition 交換單張）
+                ↓
+   病歷「醫療影像」分頁可看報告，並用 Study Instance UID 直接開 OHIF 看片
+```
+
+影像本體仍然只存在 Orthanc，FHIR 只存「索引與報告」，靠 `ImagingStudy.identifier`
+（`urn:dicom:uid` = Study Instance UID）與 `Endpoint.address`（DICOMweb 位址）指回 PACS，
+這是 EMR IG 醫療影像及報告單張的作法。
+
+### 影像歸戶操作
+
+入口：左側「影像歸戶」，或「醫療影像」頁右上角的按鈕。
+
+清單會列出 Orthanc 內所有 DICOM 檢查（`admin` / `fhir-admin` 看全院，其他人只看自己租戶），
+並標示每筆是「已建立」或「未歸戶」。點「建立 FHIR 影像紀錄」後的輸入介面分四段：
+
+```text
+一、對應病人   搜尋既有病人（姓名/病歷號/身分證），或依 DICOM 資料建立新病人；
+               可選擇要掛在哪一次就診（Encounter）
+二、檢查資訊   檢查項目名稱、ICD-10-PCS 代碼、檢查部位、Modality、Accession No.、檢查時間
+               （Modality、時間、系列與影像數都由 DICOM 自動帶入）
+三、影像報告   報告醫師、報告狀態（final / preliminary / registered）、影像所見、結論
+四、交換單張   勾選後同時產生「醫療影像及報告」交換單張（Composition）
+```
+
+DICOM 上的病人姓名常常和院內病歷姓名不同（例如英文名或代號），
+所以搜尋若查無結果會自動改列出最近建檔的病人讓你挑，不會卡住。
+
+送出後會以一個 FHIR transaction 一次寫入，全部成功或全部不寫入。
+寫入的資源與 EMR IG profile 對應：
+
+| 資源 | Profile | 內容 |
+| --- | --- | --- |
+| ImagingStudy | `ImagingStudyBase` | Study/Series/Instance UID、Modality、系列與影像數、Endpoint |
+| DiagnosticReport | `DiagnosticReport-Image` | 報告狀態、判讀醫師、結論，連到 ImagingStudy 與 Observation |
+| Observation | `Observation-Imaging-Result` | 影像所見（valueString） |
+| Endpoint | `MitwEndpoint` | DICOMweb 位址，預設 `http://localhost:8088/dicom-web` |
+| Composition | `ImageComposition` | 醫療影像及報告交換單張（選填） |
+
+歸戶後在病人的「醫療影像」分頁就會看到報告，並可按「在 OHIF 開啟」直接看片——
+因為 UID 是真的 Orthanc 檢查，OHIF 會透過同一套 Keycloak 授權的 DICOMweb 取得影像。
+
+重複歸戶保護：清單會先查 `ImagingStudy?identifier=urn:dicom:uid|...`，
+已經建立過的檢查會標示「已建立」而不再出現建立按鈕。
+
+DICOMweb 對外位址若不是預設值（例如改用區網 IP），在 `.env` 設定：
+
+```bash
+DICOMWEB_PUBLIC_URL=http://192.168.1.112:8088/dicom-web
+```
+
+### 與 DICOM / 影像系統的關係
+
+真實影像請用上面的「影像歸戶」建立 FHIR 紀錄，UID 會直接取自 Orthanc，OHIF 就能開圖。
+seed 出來的示範影像（李淑芬那筆）用的是規格範例 UID，Orthanc 內沒有對應影像，
+點 OHIF 會顯示查無資料，這是預期的。
+
+### 已知限制
+
+- 沒有做租戶隔離：有 `fhir-user` 就看得到全部病人（與 HAPI FHIR 章節的限制相同）。
+- 產生單張時只納入「該次就診」關聯到的資源；沒有指定 Encounter 的處方或檢驗不會被收進去。
+- 尚未實作調劑單張（DS）與 IG 的 FHIR Validator 驗證，`meta.profile` 只是標註，沒有做結構驗證。
+- 示範資料的醫事機構代碼、醫師證號、藥品許可證字號皆為虛構，僅供介面與流程驗收使用。
 
 ## Wazuh 整合
 
@@ -944,7 +1206,11 @@ wazuh-readonly -> readonly
 6. **多租戶更強隔離**
    - 高風險客戶建議每個租戶一台 Orthanc 或獨立資料庫 / 儲存區。
 
-7. **FHIR 資料的租戶隔離**
+7. **電子病歷交換平台的資料驗證**
+   - 目前 `meta.profile` 只是標註，沒有跑 IG 的 FHIR Validator。
+   - 正式交換前應以官方 Validator 或 HAPI Validation 驗證單張結構與必填欄位。
+
+8. **FHIR 資料的租戶隔離**
    - 目前只要有 `fhir-user` 就看得到全部 FHIR 資源。
    - 正式版建議用 HAPI 的 partitioning（一個租戶一個 partition），或在授權閘道依 `tenant_id` 限制可存取的 compartment。
    - 也要記錄誰在何時讀寫了哪些 FHIR 資源。
@@ -956,6 +1222,12 @@ backend/
   FastAPI 後端
 frontend/
   靜態前端，上傳與清單頁
+frontend/his/
+  電子病歷交換平台（FHIR Portal）前端
+frontend/keycloak-auth.js
+  兩個前端共用的 Keycloak PKCE 登入模組
+frontend/session-timeout.js
+  兩個前端共用的閒置逾時警示與自動登出
 keycloak/
   realm 匯入檔，含測試帳號與 roles
 orthanc/
@@ -964,6 +1236,8 @@ nginx/
   前端 Nginx 設定
 fhir/
   HAPI FHIR server 的 Spring 設定（application.yaml）
+fhir/seed/
+  EMR IG 示範資料 seed 腳本
 postgres/
   PostgreSQL 初始化 SQL（建立 hapi 資料庫）
 docker-compose.yml
@@ -1013,4 +1287,6 @@ Nginx / auth-service 驗證 token
 - 若之前啟動過舊版容器，請用 `docker compose down -v` 清掉舊資料後再 `docker compose up --build`，避免 realm 沒有重新匯入。
 - 新增的 `fhir-user` / `fhir-admin` role 需要 Keycloak 重新匯入 realm 才會出現。因為 `keycloak` 服務沒有掛 volume，重建容器就會重新匯入：`docker compose up -d --force-recreate keycloak`。
 - 登入後右上角會依 role 顯示管理連結：`admin` 看得到 Keycloak / Orthanc 管理，`wazuh-*` 看得到 Wazuh，`fhir-*` 看得到 FHIR Server。沒有對應 role 的人看不到，也打不進去（後端與 Nginx 會擋）。
-- `customer-a` / `customer-b` 沒有設定 email，無法用 password grant（`curl` 直接換 token）取得 access token，會回 `Account is not fully set up`。要用指令列測 API 請改用 `portal-admin`，或先在 Keycloak 幫這兩個帳號補 email。
+- `customer-a` / `customer-b` 已補上 email，可以用 password grant 直接換 token 測 API。若你的環境是舊的 realm 匯入檔，這兩個帳號會因為沒有 email 而回 `Account is not fully set up`，重建 Keycloak 容器或在管理後台補上 email 即可。
+- 登入後閒置 18 分鐘會跳出「是否要延長登入時間？」，20 分鐘沒有動作才自動登出；有在操作就會一直延長。
+- 驗收權限差異最快的方式：`portal-admin` 有 `fhir-admin` 可以建檔，`customer-a` 只有 `fhir-user`，登入 `http://localhost:8088/his/` 後看不到任何建檔按鈕。

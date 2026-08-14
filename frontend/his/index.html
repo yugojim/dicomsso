@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>電子病歷交換平台 · 示範醫學中心</title>
+  <link rel="stylesheet" href="/his/his.css?v=20260814-link2" />
+</head>
+<body>
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path d="M10 2h4v6h6v4h-6v10h-4V12H4V8h6z" fill="currentColor"/></svg>
+        </span>
+        <span class="brand-text">
+          <strong>示範醫學中心</strong>
+          <small>電子病歷交換平台 · EMR IG / TW Core</small>
+        </span>
+      </div>
+
+      <form id="globalSearch" class="global-search" role="search">
+        <input id="globalSearchInput" type="search" placeholder="病歷號 / 姓名 / 身分證字號" autocomplete="off" />
+        <button type="submit" class="btn btn-ghost">查詢病人</button>
+      </form>
+
+      <div class="topbar-right">
+        <a class="topbar-link" href="/" title="回到 DICOM 影像上傳入口">影像入口</a>
+        <div class="user-chip">
+          <span class="user-avatar" id="userAvatar">—</span>
+          <span class="user-meta">
+            <strong id="userName">未登入</strong>
+            <small id="userRoles">—</small>
+          </span>
+        </div>
+        <button id="logoutBtn" class="btn btn-ghost">登出</button>
+      </div>
+    </header>
+
+    <div class="shell">
+      <nav class="rail" aria-label="主功能">
+        <a class="rail-item" data-nav="#/patients">
+          <span class="rail-icon">◫</span><span>病人主檔</span>
+        </a>
+        <a class="rail-item" data-nav="#/documents">
+          <span class="rail-icon">▤</span><span>交換單張</span>
+        </a>
+        <a class="rail-item" data-nav="#/imaging">
+          <span class="rail-icon">◉</span><span>醫療影像</span>
+        </a>
+        <a class="rail-item" data-nav="#/link-imaging">
+          <span class="rail-icon">⇄</span><span>影像歸戶</span>
+        </a>
+        <a class="rail-item" data-nav="#/labs">
+          <span class="rail-icon">◈</span><span>檢驗檢查</span>
+        </a>
+        <a class="rail-item" data-nav="#/server">
+          <span class="rail-icon">⌗</span><span>伺服器資訊</span>
+        </a>
+        <div class="rail-foot">
+          <span class="pill pill-quiet" id="writeBadge">唯讀</span>
+          <small>FHIR R4</small>
+        </div>
+      </nav>
+
+      <main id="view" class="view" tabindex="-1"></main>
+    </div>
+  </div>
+
+  <section id="gate" class="gate">
+    <div class="gate-card">
+      <div class="gate-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="30" height="30"><path d="M10 2h4v6h6v4h-6v10h-4V12H4V8h6z" fill="currentColor"/></svg>
+      </div>
+      <h1>電子病歷交換平台</h1>
+      <p class="gate-sub">示範醫學中心 · 依衛福部電子病歷交換單張實作指引（EMR IG）建置</p>
+      <p id="gateMessage" class="gate-msg">請以院內 SSO 帳號登入。</p>
+      <button id="loginBtn" class="btn btn-primary btn-lg">SSO 登入</button>
+      <ul class="gate-notes">
+        <li>本系統帳號與權限由 Keycloak 控管</li>
+        <li><code>fhir-user</code>：查詢病歷 · <code>fhir-admin</code>：建檔與開立</li>
+      </ul>
+    </div>
+  </section>
+
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <div>
+        <span class="drawer-kicker">原始 FHIR 資源</span>
+        <strong id="drawerTitle">Resource</strong>
+      </div>
+      <div class="drawer-actions">
+        <button id="drawerCopy" class="btn btn-ghost btn-sm">複製 JSON</button>
+        <button id="drawerClose" class="btn btn-ghost btn-sm">關閉</button>
+      </div>
+    </div>
+    <pre id="drawerBody" class="drawer-body"></pre>
+  </div>
+
+  <div id="modalHost" class="modal-host" hidden></div>
+  <div id="toastHost" class="toast-host" aria-live="polite"></div>
+
+  <script src="/session-timeout.js?v=20260814-idle"></script>
+  <script src="/keycloak-auth.js?v=20260814-idle"></script>
+  <script src="/his/his.js?v=20260814-link2"></script>
+</body>
+</html>

@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     tenant_claim: str = "tenant_id"
     cors_origin: str = "http://localhost:8088"
     ohif_viewer_url: str = "http://localhost:3000/viewer"
+    # 寫進 FHIR Endpoint.address 的 DICOMweb 位址（影像歸戶時用）
+    dicomweb_public_url: str = "http://localhost:8088/dicom-web"
 
     line_channel_access_token: str = ""
     line_channel_secret: str = ""

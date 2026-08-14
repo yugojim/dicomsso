@@ -18,7 +18,7 @@
     <nav class="actions" aria-label="系統操作">
       <a id="keycloakAdminLink" class="admin-link" href="http://localhost:8080/admin/master/console/#/dicom" target="_blank" rel="noopener" hidden>Keycloak 管理</a>
       <a id="orthancAdminLink" class="admin-link" href="http://localhost:18042/app/explorer.html" target="_blank" rel="noopener" hidden>Orthanc 管理</a>
-      <a id="wazuhLink" class="admin-link" href="http://localhost:15601/" target="_blank" rel="noopener" hidden>Wazuh</a>
+      <a id="hisLink" class="admin-link" href="/his/" hidden>電子病歷交換平台</a>
       <a id="fhirLink" class="admin-link" href="http://localhost:18090/" target="_blank" rel="noopener" hidden>FHIR Server</a>
       <button id="loginBtn">SSO 登入</button>
       <button id="registerBtn" class="secondary">註冊帳號</button>
@@ -62,7 +62,6 @@
         </label>
         <div class="upload-actions">
           <button id="uploadBtn">上傳檔案</button>
-          <button id="lineFormatBtn" class="secondary" hidden>送出 LINE 格式測試</button>
         </div>
         <pre id="uploadResult" aria-live="polite"></pre>
       </article>
@@ -98,6 +97,7 @@
     </section>
   </main>
 
-  <script src="/app.js?v=20260813-fhir"></script>
+  <script src="/session-timeout.js?v=20260814-idle"></script>
+  <script src="/app.js?v=20260814-idle"></script>
 </body>
 </html>

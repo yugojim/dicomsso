@@ -198,6 +198,7 @@ async def upload_dicom(
 ):
     results = []
     notification_studies = []
+    skipped_notifications = 0
     for f in files:
         content = await f.read()
         if not content:
@@ -218,6 +219,7 @@ async def upload_dicom(
             except Exception as exc:
                 raise HTTPException(status_code=502, detail=f"Orthanc metadata lookup failed for {f.filename}: {exc}")
 
+            is_new_study = True
             try:
                 db.add(row)
                 db.commit()
@@ -232,27 +234,201 @@ async def upload_dicom(
                     )
                 )
                 row = existing
+                is_new_study = False
 
             results.append({
                 "filename": f.filename,
                 "status": uploaded.get("Status"),
+                # 影像清單只有在這裡是 "new" 時才會多一列；重複上傳同一個 study 會是 "existing"。
+                "record": "new" if is_new_study else "existing",
                 "orthanc_instance_id": uploaded.get("ID"),
                 "orthanc_study_id": row.orthanc_study_id if row else None,
                 "study_instance_uid": tags.get("StudyInstanceUID"),
             })
-            notification_studies.append({
-                "filename": f.filename,
-                "orthanc_study_id": row.orthanc_study_id if row else None,
-                "study_instance_uid": tags.get("StudyInstanceUID"),
-                "patient_id": row.patient_id if row else tags.get("PatientID"),
-                "patient_name": row.patient_name if row else str(tags.get("PatientName", "")),
-                "study_date": row.study_date if row else tags.get("StudyDate"),
-                "modality": row.modality if row else tags.get("Modality"),
-                "description": row.description if row else tags.get("StudyDescription") or tags.get("SeriesDescription"),
-            })
+            # 只有真正新增的檢查才通知 LINE。
+            # 重複上傳同一個 Study（或同一個檢查的其他 instance）不再重複推播。
+            if is_new_study:
+                notification_studies.append({
+                    "filename": f.filename,
+                    "orthanc_study_id": row.orthanc_study_id if row else None,
+                    "study_instance_uid": tags.get("StudyInstanceUID"),
+                    "patient_id": row.patient_id if row else tags.get("PatientID"),
+                    "patient_name": row.patient_name if row else str(tags.get("PatientName", "")),
+                    "study_date": row.study_date if row else tags.get("StudyDate"),
+                    "modality": row.modality if row else tags.get("Modality"),
+                    "description": row.description if row else tags.get("StudyDescription") or tags.get("SeriesDescription"),
+                })
+            else:
+                skipped_notifications += 1
+
     if notification_studies:
+        logger.info("LINE notification queued for %d new study(ies)", len(notification_studies))
         background_tasks.add_task(line_bot.notify_upload, notification_studies, user)
-    return {"uploaded": results}
+    elif skipped_notifications:
+        logger.info("LINE notification skipped: %d duplicate study upload(s)", skipped_notifications)
+
+    new_studies = {r["orthanc_study_id"] for r in results if r["record"] == "new" and r["orthanc_study_id"]}
+    existing_studies = {
+        r["orthanc_study_id"] for r in results
+        if r["record"] == "existing" and r["orthanc_study_id"] and r["orthanc_study_id"] not in new_studies
+    }
+    return {
+        "uploaded": results,
+        "summary": {
+            "files": len(results),
+            "new_studies": len(new_studies),
+            "existing_studies": len(existing_studies),
+            "message": (
+                f"新增 {len(new_studies)} 筆影像"
+                + (f"；另有 {len(existing_studies)} 筆為系統中已存在的檢查，影像清單不會重複列出"
+                   if existing_studies else "")
+            ) if new_studies else (
+                "這些影像在系統中都已存在（同一個 Study 只會列出一次），因此影像清單沒有變動"
+                if existing_studies else "沒有匯入任何 DICOM 影像"
+            ),
+        },
+    }
+
+def _dicom_date_time(date: str | None, time: str | None) -> str | None:
+    """DICOM 的 YYYYMMDD / HHMMSS 轉成 FHIR dateTime。"""
+    if not date or len(date) < 8:
+        return None
+    stamp = f"{date[0:4]}-{date[4:6]}-{date[6:8]}"
+    if time and len(time) >= 6:
+        stamp += f"T{time[0:2]}:{time[2:4]}:{time[4:6]}+08:00"
+    return stamp
+
+
+def _visible_studies(db: Session, user: dict[str, Any]) -> list[DicomStudy]:
+    query = select(DicomStudy).order_by(desc(DicomStudy.created_at))
+    # 影像歸戶是跨租戶的作業（放射科要幫全院影像建 FHIR 紀錄），
+    # 所以 admin 與 fhir-admin 看得到全部，其他人只看自己的租戶。
+    if not ({"admin", "fhir-admin"} & user["roles"]):
+        query = query.where(DicomStudy.tenant_id == user["tenant_id"])
+    return list(db.scalars(query).all())
+
+
+@app.get("/api/imaging/dicom-studies")
+async def list_dicom_studies_for_fhir(
+    db: Session = Depends(get_db),
+    user=Depends(require_role("fhir-user", "fhir-admin")),
+):
+    """給電子病歷交換平台用的 DICOM 檢查清單（Orthanc + 入口資料庫）。
+
+    只回組 FHIR ImagingStudy 需要的欄位；series / instance 明細另外用單筆 API 取。
+    """
+    rows = _visible_studies(db, user)
+    studies = []
+    for row in rows:
+        detail: dict[str, Any] = {}
+        try:
+            detail = await orthanc.study(row.orthanc_study_id)
+        except Exception as exc:  # Orthanc 內已被刪掉的檢查不要讓整張清單掛掉
+            logger.warning("Orthanc study %s lookup failed: %s", row.orthanc_study_id, exc)
+
+        tags = detail.get("MainDicomTags", {})
+        patient_tags = detail.get("PatientMainDicomTags", {})
+        studies.append({
+            "orthanc_study_id": row.orthanc_study_id,
+            "study_instance_uid": row.study_instance_uid or tags.get("StudyInstanceUID"),
+            "accession_number": tags.get("AccessionNumber") or None,
+            "study_description": tags.get("StudyDescription") or row.description,
+            "study_date": tags.get("StudyDate") or row.study_date,
+            "study_time": tags.get("StudyTime"),
+            "started": _dicom_date_time(tags.get("StudyDate") or row.study_date, tags.get("StudyTime")),
+            "institution_name": (tags.get("InstitutionName") or "").strip(" .") or None,
+            "referring_physician": tags.get("ReferringPhysicianName") or None,
+            "dicom_patient": {
+                "id": patient_tags.get("PatientID") or row.patient_id,
+                "name": patient_tags.get("PatientName") or row.patient_name,
+                "birth_date": patient_tags.get("PatientBirthDate"),
+                "sex": patient_tags.get("PatientSex"),
+            },
+            "modality": row.modality,
+            "number_of_series": len(detail.get("Series", [])) or None,
+            "uploaded_by": row.uploaded_by,
+            "tenant_id": row.tenant_id,
+            "uploaded_at": row.created_at.isoformat(),
+            "in_orthanc": bool(detail),
+            "ohif_url": ohif_url(row.study_instance_uid),
+        })
+    return {"studies": studies}
+
+
+@app.get("/api/imaging/dicom-studies/{orthanc_study_id}")
+async def dicom_study_detail_for_fhir(
+    orthanc_study_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(require_role("fhir-user", "fhir-admin")),
+):
+    """單一檢查的完整 series / instance 明細，直接對應 FHIR ImagingStudy.series。"""
+    row = next((r for r in _visible_studies(db, user) if r.orthanc_study_id == orthanc_study_id), None)
+    if not row:
+        raise HTTPException(status_code=404, detail="Study not found")
+
+    try:
+        detail = await orthanc.study(orthanc_study_id)
+        instances = await orthanc.study_instances(orthanc_study_id)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Orthanc lookup failed: {exc}")
+
+    # instance 的 MainDicomTags 沒有 SeriesInstanceUID，只有 ParentSeries（Orthanc 內部 id），
+    # 所以用 ParentSeries 當 key，下面走訪 detail["Series"] 時剛好也是同一組 id。
+    series_map: dict[str, list[dict[str, Any]]] = {}
+    for inst in instances:
+        tags = inst.get("MainDicomTags", {})
+        number = tags.get("InstanceNumber")
+        series_map.setdefault(inst.get("ParentSeries", ""), []).append({
+            "uid": tags.get("SOPInstanceUID"),
+            "number": int(number) if str(number).isdigit() else None,
+            "frames": tags.get("NumberOfFrames"),
+            "orthanc_id": inst.get("ID"),
+        })
+
+    series = []
+    for series_id in detail.get("Series", []):
+        try:
+            info = await orthanc.series(series_id)
+        except Exception as exc:
+            logger.warning("Orthanc series %s lookup failed: %s", series_id, exc)
+            continue
+        tags = info.get("MainDicomTags", {})
+        series_instances = sorted(series_map.get(series_id, []), key=lambda i: (i["number"] is None, i["number"] or 0))
+        series.append({
+            "uid": tags.get("SeriesInstanceUID", ""),
+            "number": int(tags["SeriesNumber"]) if str(tags.get("SeriesNumber", "")).isdigit() else None,
+            "modality": tags.get("Modality"),
+            "description": tags.get("SeriesDescription") or None,
+            "body_part": tags.get("BodyPartExamined") or None,
+            "manufacturer": tags.get("Manufacturer") or None,
+            "instances": series_instances,
+            "number_of_instances": len(series_instances),
+        })
+
+    study_tags = detail.get("MainDicomTags", {})
+    patient_tags = detail.get("PatientMainDicomTags", {})
+    return {
+        "orthanc_study_id": orthanc_study_id,
+        "study_instance_uid": study_tags.get("StudyInstanceUID") or row.study_instance_uid,
+        "accession_number": study_tags.get("AccessionNumber") or None,
+        "study_description": study_tags.get("StudyDescription") or row.description,
+        "started": _dicom_date_time(study_tags.get("StudyDate"), study_tags.get("StudyTime")),
+        "institution_name": (study_tags.get("InstitutionName") or "").strip(" .") or None,
+        "dicom_patient": {
+            "id": patient_tags.get("PatientID"),
+            "name": patient_tags.get("PatientName"),
+            "birth_date": patient_tags.get("PatientBirthDate"),
+            "sex": patient_tags.get("PatientSex"),
+        },
+        "modalities": sorted({s["modality"] for s in series if s.get("modality")}),
+        "number_of_series": len(series),
+        "number_of_instances": sum(s["number_of_instances"] for s in series),
+        "series": series,
+        "dicomweb_endpoint": settings.dicomweb_public_url,
+        "uploaded_by": row.uploaded_by,
+        "tenant_id": row.tenant_id,
+    }
+
 
 @app.get("/api/studies")
 async def list_studies(db: Session = Depends(get_db), user=Depends(require_role("viewer", "uploader"))):

@@ -4,7 +4,6 @@ const apiBase = window.location.origin;
 const keycloakBase = `${appScheme}//${currentHost}:8080`;
 const ohifBase = `${appScheme}//${currentHost}:13000`;
 const orthancAdminBase = `${appScheme}//${currentHost}:18042`;
-const wazuhBase = `${appScheme}//${currentHost}:15601`;
 const fhirBase = `${appScheme}//${currentHost}:18090`;
 const realm = "dicom";
 const clientId = "dicom-portal";
@@ -14,7 +13,8 @@ const authUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/auth`;
 const registrationUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/registrations`;
 const tokenUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/token`;
 const logoutUrl = `${keycloakBase}/realms/${realm}/protocol/openid-connect/logout`;
-const loginTtlMs = 20 * 60 * 1000;
+const idleTimeoutMs = 20 * 60 * 1000;   // 閒置多久自動登出
+const idleWarnMs = 2 * 60 * 1000;      // 登出前多久跳出延長提示（第 18 分鐘）
 
 let tokenSet = loadTokenSet();
 
@@ -108,9 +108,10 @@ async function sha256(text) {
 
 function saveTokenSet(data) {
   const expiresAt = Date.now() + ((data.expires_in || 300) * 1000);
+  // 閒置計時由 session-timeout.js 維護，換 token 不重算，只在沒有值時給預設。
   const authenticatedUntil = tokenSet?.authenticated_until && tokenSet.authenticated_until > Date.now()
     ? tokenSet.authenticated_until
-    : Date.now() + loginTtlMs;
+    : Date.now() + idleTimeoutMs;
   tokenSet = { ...tokenSet, ...data, expires_at: expiresAt, authenticated_until: authenticatedUntil };
   localStorage.setItem("tokenSet", JSON.stringify(tokenSet));
   saveTokenCookie();
@@ -122,7 +123,7 @@ function loadTokenSet() {
     if (!stored) return null;
     const parsed = JSON.parse(stored);
     if (parsed && !parsed.authenticated_until) {
-      parsed.authenticated_until = Date.now() + loginTtlMs;
+      parsed.authenticated_until = Date.now() + idleTimeoutMs;
       localStorage.setItem("tokenSet", JSON.stringify(parsed));
     }
     return parsed;
@@ -273,13 +274,13 @@ async function handleCallbackIfNeeded() {
   history.replaceState({}, document.title, redirectUri);
 }
 
-async function ensureToken() {
+async function ensureToken(force = false) {
   if (!isAuthenticated()) {
     clearTokenSet();
-    throw new Error("登入已超過 20 分鐘，請重新登入");
+    throw new Error("閒置超過 20 分鐘，請重新登入");
   }
   if (!tokenSet?.refresh_token) return;
-  if (Date.now() < (tokenSet.expires_at || 0) - 30000) return;
+  if (!force && Date.now() < (tokenSet.expires_at || 0) - 30000) return;
 
   const body = new URLSearchParams({
     grant_type: "refresh_token",
@@ -384,48 +385,37 @@ async function uploadFiles() {
   } catch {
     body = { detail: text || `Upload failed with HTTP ${r.status}` };
   }
-  $("uploadResult").textContent = pretty(body);
+  $("uploadResult").textContent = formatUploadResult(body, r.ok);
   if (!r.ok) throw new Error(`/api/upload failed: ${r.status}`);
   await loadStudies();
 }
 
-async function sendLineFormatSamples() {
-  if (!isAuthenticated()) return alert("請先登入");
-  await ensureToken();
-  $("lineFormatBtn").disabled = true;
-  $("uploadResult").textContent = "正在送出 LINE 訊息格式測試...";
-  try {
-    const r = await fetch(`${apiBase}/api/line/send-message-format-samples`, {
-      method: "POST",
-      headers: tokenHeader()
-    });
-    const text = await r.text();
-    let body;
-    try {
-      body = text ? JSON.parse(text) : {};
-    } catch {
-      body = { detail: text || `LINE push failed with HTTP ${r.status}` };
-    }
-    $("uploadResult").textContent = pretty(body);
-    if (!r.ok) throw new Error(`/api/line/send-message-format-samples failed: ${r.status}`);
-  } finally {
-    $("lineFormatBtn").disabled = false;
+// 重複上傳同一個 Study 時後端會沿用既有紀錄，影像清單不會多一列。
+// 只印原始 JSON 的話看起來像「沒反應」，所以這裡先給一段人看得懂的結果說明。
+function formatUploadResult(body, ok) {
+  if (!ok || !body?.summary) return pretty(body);
+
+  const lines = [`上傳完成：共 ${body.summary.files} 個檔案`, body.summary.message, ""];
+  for (const item of body.uploaded || []) {
+    const state = item.record === "new" ? "新增" : "已存在，未重複列出";
+    lines.push(`· ${item.filename}：${state}`);
+    lines.push(`    Study UID ${item.study_instance_uid || "—"}　Orthanc ${item.status || "—"}`);
   }
+  lines.push("", "原始回應：", pretty(body));
+  return lines.join("\n");
 }
 
 function updateButtons() {
   $("keycloakAdminLink").href = `${keycloakBase}/admin/master/console/#/${realm}`;
   $("orthancAdminLink").href = `${orthancAdminBase}/app/explorer.html`;
-  $("wazuhLink").href = `${wazuhBase}/`;
   $("fhirLink").href = `${fhirBase}/`;
   $("loginBtn").hidden = isAuthenticated();
   $("registerBtn").hidden = isAuthenticated();
   $("logoutBtn").hidden = !isAuthenticated();
   $("keycloakAdminLink").hidden = !isAuthenticated() || !hasRealmRole("admin");
   $("orthancAdminLink").hidden = !isAuthenticated() || !hasRealmRole("admin");
-  $("wazuhLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "wazuh-admin", "wazuh-readonly");
+  $("hisLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "fhir-admin", "fhir-user");
   $("fhirLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "fhir-admin", "fhir-user");
-  $("lineFormatBtn").hidden = !isAuthenticated() || !hasRealmRole("admin");
 }
 
 async function init() {
@@ -434,6 +424,7 @@ async function init() {
     updateButtons();
     if (isAuthenticated()) {
       saveTokenCookie();
+      startSessionGuard();
       const claims = decodeJwt(tokenSet.access_token);
       const roles = claims.realm_access?.roles || [];
       $("me").textContent = pretty({ login: claims.preferred_username, tenant_id: claims.tenant_id, roles });
@@ -452,7 +443,7 @@ async function init() {
     }
   } catch (e) {
     console.error(e);
-    if (e.message.includes("登入已")) {
+    if (e.message.includes("登入已") || e.message.includes("閒置")) {
       showLoggedOut(`SSO 設定或登入流程錯誤：\n${e.message}`);
       return;
     }
@@ -461,11 +452,28 @@ async function init() {
   }
 }
 
+function startSessionGuard() {
+  if (!isAuthenticated()) return;
+  SessionGuard.start({
+    idleMs: idleTimeoutMs,
+    warnMs: idleWarnMs,
+    onTouch: until => {
+      if (!tokenSet) return;
+      tokenSet.authenticated_until = until;
+      saveTokenCookie();
+    },
+    onExtend: () => ensureToken(true),
+    onExpire: reason => {
+      SessionGuard.stop();
+      showLoggedOut(`${reason}\n請重新登入。`);
+    },
+  });
+}
+
 $("loginBtn").onclick = login;
 $("registerBtn").onclick = registerAccount;
 $("logoutBtn").onclick = logout;
 $("uploadBtn").onclick = uploadFiles;
-$("lineFormatBtn").onclick = sendLineFormatSamples;
 $("refreshBtn").onclick = loadStudies;
 
 init();

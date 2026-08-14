@@ -49,6 +49,7 @@ services:
       TENANT_CLAIM: tenant_id
       CORS_ORIGIN: http://localhost:8088
       OHIF_VIEWER_URL: http://localhost:13000/viewer
+      DICOMWEB_PUBLIC_URL: ${DICOMWEB_PUBLIC_URL:-http://localhost:8088/dicom-web}
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
       LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
       LINE_GROUP_ID: ${LINE_GROUP_ID:-}

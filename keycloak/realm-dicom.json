@@ -9,16 +9,37 @@
   "rememberMe": true,
   "accessTokenLifespan": 1200,
   "ssoSessionIdleTimeout": 1200,
-  "ssoSessionMaxLifespan": 1200,
+  "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
-      { "name": "viewer", "description": "Can view own uploaded DICOM studies" },
-      { "name": "uploader", "description": "Can upload DICOM files" },
-      { "name": "admin", "description": "Portal administrator" },
-      { "name": "wazuh-admin", "description": "Can access Wazuh as an administrator" },
-      { "name": "wazuh-readonly", "description": "Can access Wazuh as a read-only user" },
-      { "name": "fhir-user", "description": "Can read FHIR resources on the HAPI FHIR server" },
-      { "name": "fhir-admin", "description": "Can read and write FHIR resources on the HAPI FHIR server" }
+      {
+        "name": "viewer",
+        "description": "Can view own uploaded DICOM studies"
+      },
+      {
+        "name": "uploader",
+        "description": "Can upload DICOM files"
+      },
+      {
+        "name": "admin",
+        "description": "Portal administrator"
+      },
+      {
+        "name": "wazuh-admin",
+        "description": "Can access Wazuh as an administrator"
+      },
+      {
+        "name": "wazuh-readonly",
+        "description": "Can access Wazuh as a read-only user"
+      },
+      {
+        "name": "fhir-user",
+        "description": "Can read FHIR resources on the HAPI FHIR server"
+      },
+      {
+        "name": "fhir-admin",
+        "description": "Can read and write FHIR resources on the HAPI FHIR server"
+      }
     ]
   },
   "clients": [
@@ -82,12 +103,23 @@
       "firstName": "Customer",
       "lastName": "A",
       "attributes": {
-        "tenant_id": ["tenant-a"]
+        "tenant_id": [
+          "tenant-a"
+        ]
       },
       "credentials": [
-        { "type": "password", "value": "customer-a", "temporary": false }
+        {
+          "type": "password",
+          "value": "customer-a",
+          "temporary": false
+        }
       ],
-      "realmRoles": ["viewer", "uploader", "fhir-user"]
+      "realmRoles": [
+        "viewer",
+        "uploader",
+        "fhir-user"
+      ],
+      "email": "customer-a@example.local"
     },
     {
       "username": "customer-b",
@@ -96,12 +128,23 @@
       "firstName": "Customer",
       "lastName": "B",
       "attributes": {
-        "tenant_id": ["tenant-b"]
+        "tenant_id": [
+          "tenant-b"
+        ]
       },
       "credentials": [
-        { "type": "password", "value": "customer-b", "temporary": false }
+        {
+          "type": "password",
+          "value": "customer-b",
+          "temporary": false
+        }
       ],
-      "realmRoles": ["viewer", "uploader", "fhir-user"]
+      "realmRoles": [
+        "viewer",
+        "uploader",
+        "fhir-user"
+      ],
+      "email": "customer-b@example.local"
     },
     {
       "username": "portal-admin",
@@ -111,12 +154,25 @@
       "firstName": "Portal",
       "lastName": "Admin",
       "attributes": {
-        "tenant_id": ["admin"]
+        "tenant_id": [
+          "admin"
+        ]
       },
       "credentials": [
-        { "type": "password", "value": "portal-admin", "temporary": false }
+        {
+          "type": "password",
+          "value": "portal-admin",
+          "temporary": false
+        }
       ],
-      "realmRoles": ["admin", "viewer", "uploader", "wazuh-admin", "fhir-user", "fhir-admin"]
+      "realmRoles": [
+        "admin",
+        "viewer",
+        "uploader",
+        "wazuh-admin",
+        "fhir-user",
+        "fhir-admin"
+      ]
     }
   ]
 }
