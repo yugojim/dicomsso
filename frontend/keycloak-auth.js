@@ -8,7 +8,10 @@
 (function (global) {
   const currentHost = global.location.hostname;
   const scheme = global.location.protocol;
-  const keycloakBase = `${scheme}//${currentHost}:8080`;
+  // https 時 Keycloak 走 nginx 的 8443（TLS 終結），http 時才是舊的直連 8080
+  const keycloakBase = scheme === "https:"
+    ? `https://${currentHost}:8443`
+    : `http://${currentHost}:8080`;
   const realm = "dicom";
   const clientId = "dicom-portal";
   const loginTtlMs = 20 * 60 * 1000;
@@ -46,7 +49,7 @@
     if (!tokenSet?.access_token) return;
     const validUntil = Math.min(tokenSet.expires_at || 0, tokenSet.authenticated_until || 0);
     const maxAge = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
-    document.cookie = `kc_token=${encodeURIComponent(tokenSet.access_token)}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+    document.cookie = `kc_token=${encodeURIComponent(tokenSet.access_token)}; Max-Age=${maxAge}; Path=/; SameSite=Lax${global.location.protocol === "https:" ? "; Secure" : ""}`;
   }
 
   function clear() {

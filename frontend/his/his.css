@@ -613,7 +613,8 @@ table.data td.nowrap, table.data th.nowrap { white-space: nowrap; }
 .drawer .btn-ghost { border-color: rgba(255, 255, 255, .25); color: #dbe7f5; }
 .drawer .btn-ghost:hover { background: rgba(255, 255, 255, .12); }
 .drawer-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
   padding: 14px 16px;
   overflow: auto;
@@ -636,13 +637,22 @@ table.data td.nowrap, table.data th.nowrap { white-space: nowrap; }
 .modal-host[hidden] { display: none; }
 .modal {
   width: min(680px, 100%);
-  max-height: 88vh;
+  /* 視窗矮的時候要留邊，不然表單會頂到畫面外 */
+  max-height: min(88vh, calc(100vh - 40px));
   display: flex;
   flex-direction: column;
   background: var(--panel);
   border-radius: 10px;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+}
+/* modal 的直接子元素是 <form>（body 與 foot 都包在裡面），
+   form 必須跟著撐成可壓縮的 flex 容器，.modal-body 的捲軸才會生效。 */
+.modal > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .modal-wide { width: min(940px, 100%); }
 .form-section {
@@ -695,7 +705,14 @@ table.data td.nowrap, table.data th.nowrap { white-space: nowrap; }
 }
 .modal-head h2 { margin: 0; font-size: 15px; }
 .modal-head .sub { font-size: 11.5px; color: var(--muted); }
-.modal-body { padding: 16px 18px; overflow: auto; }
+.modal-head, .modal-foot { flex: 0 0 auto; }
+.modal-body {
+  padding: 16px 18px;
+  flex: 1 1 auto;
+  min-height: 0;          /* flex 子元素預設 min-height:auto，不設就不會縮，也就不會出現捲軸 */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .modal-foot {
   display: flex;
   justify-content: flex-end;

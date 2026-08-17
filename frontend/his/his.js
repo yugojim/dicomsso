@@ -9,6 +9,7 @@
 
 const FHIR_BASE = `${window.location.origin}/fhir`;
 const OHIF_BASE = `${window.location.protocol}//${window.location.hostname}:13000`;
+const FHIR_SERVER_BASE = `${window.location.protocol}//${window.location.hostname}:18090`;
 
 const EMR_SD = "https://twcore.mohw.gov.tw/ig/emr/StructureDefinition";
 const CS_ICD10 = "https://twcore.mohw.gov.tw/ig/twcore/CodeSystem/icd-10-cm-2021-tw";
@@ -629,7 +630,8 @@ function renderPatientTab(tab, data) {
 
 function bindTabActions(tab, data) {
   const p = data.patient;
-  if ($("newLabBtn")) $("newLabBtn").addEventListener("click", () => newLabModal(p, data));
+  if ($("newLabBtn")) $("newLabBtn").addEventListener("click", () =>
+    newLabReportModal({ patientName: patientName(p) }));
   if ($("newRxBtn")) $("newRxBtn").addEventListener("click", () => newRxModal(p, data));
   document.querySelectorAll("[data-make-doc]").forEach(btn => {
     btn.addEventListener("click", () => buildCompositionModal(data, btn.dataset.makeDoc));
@@ -1001,68 +1003,6 @@ function newVisitModal(patient) {
   });
 }
 
-function newLabModal(patient, data) {
-  const encOptions = [{ value: "", label: "（不指定）" }].concat(data.encounters.map(e => ({
-    value: `Encounter/${e.id}`,
-    label: `${fmtDateTime(e.period?.start)} ${codingText(e.serviceType)}`,
-  })));
-  openModal({
-    title: "登錄檢驗結果",
-    sub: "Observation（EMR IG：InspectionCheckObservation）",
-    submitLabel: "儲存檢驗結果",
-    bodyHtml: `<div class="form-grid">
-      ${field("panel", "檢驗套組名稱", { value: "全套血液檢查 CBC", required: true })}
-      ${field("loinc", "套組 LOINC", { value: "58410-2", required: true })}
-      ${field("when", "檢驗時間", { type: "datetime-local", value: nowLocalInput(), required: true })}
-      ${field("performer", "檢驗人員", { options: practitionerOptions(), required: true })}
-      ${field("encounter", "關聯就診", { options: encOptions })}
-      ${field("interp", "整體判讀", { options: [
-        { value: "N", label: "正常" }, { value: "H", label: "偏高" },
-        { value: "L", label: "偏低" }, { value: "A", label: "異常" }] })}
-      ${field("items", "檢驗明細", {
-        type: "textarea", wide: true, rows: 5,
-        value: "6690-2|白血球 WBC|7.33|10^3/uL|3.8 - 10.0\n718-7|血紅素 Hgb|13.9|g/dL|13.0 - 17.0",
-        hint: "每行一項：LOINC|項目名稱|數值|單位|參考值",
-      })}
-    </div>`,
-    onSubmit: async form => {
-      const get = k => (form.get(k) || "").trim();
-      const components = get("items").split("\n").map(line => line.trim()).filter(Boolean).map(line => {
-        const [loinc, name, value, unit, ref] = line.split("|").map(x => (x || "").trim());
-        if (!loinc || !name) throw new Error(`檢驗明細格式錯誤：${line}`);
-        const c = { code: { coding: [{ system: LOINC, code: loinc }], text: name } };
-        if (value !== undefined && value !== "" && !Number.isNaN(Number(value))) {
-          c.valueQuantity = { value: Number(value), unit: unit || undefined, system: "http://unitsofmeasure.org" };
-        } else if (value) {
-          c.valueString = value;
-        }
-        if (ref) c.referenceRange = [{ text: ref }];
-        return c;
-      });
-      if (!components.length) throw new Error("請至少輸入一項檢驗明細");
-
-      const interpText = { N: "正常", H: "偏高", L: "偏低", A: "異常" }[get("interp")] || "";
-      const observation = {
-        resourceType: "Observation",
-        meta: { profile: [`${EMR_SD}/InspectionCheckObservation`] },
-        status: "final",
-        category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category", code: "laboratory", display: "Laboratory" }], text: "Laboratory" }],
-        code: { coding: [{ system: LOINC, code: get("loinc") }], text: get("panel") },
-        subject: { reference: `Patient/${patient.id}` },
-        effectiveDateTime: toFhirDateTime(get("when")),
-        performer: [{ reference: get("performer") }],
-        interpretation: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation", code: get("interp") }], text: interpText }],
-        component: components,
-      };
-      if (get("encounter")) observation.encounter = { reference: get("encounter") };
-
-      await fhir("/Observation", { method: "POST", body: observation });
-      toast(`已登錄檢驗結果：${get("panel")}`);
-      viewPatient(patient.id, "labs");
-    },
-  });
-}
-
 function newRxModal(patient, data) {
   const encOptions = [{ value: "", label: "（不指定）" }].concat(data.encounters.map(e => ({
     value: `Encounter/${e.id}`,
@@ -1239,6 +1179,589 @@ function buildCompositionModal(data, encounterId) {
         },
       });
       toast(`已產生${meta[2]}（${sections.length} 個章節）`);
+      location.hash = `#/document/${created.id}`;
+    },
+  });
+}
+
+/* ============================ 共用：病人選擇器 ============================ */
+
+function patientPickerHtml({ label = "對應病人", withEncounter = true } = {}) {
+  return `
+    <div class="form-grid">
+      ${field("patientQuery", "搜尋病人", { hint: "輸入姓名 / 病歷號 / 身分證字號後自動查詢" })}
+      <div class="field">
+        <label for="patientRef">${esc(label)} *</label>
+        <select name="patientRef" id="patientRef"><option value="">（請先搜尋）</option></select>
+        <span class="hint" id="patientHint">　</span>
+      </div>
+      ${withEncounter ? `
+      <div class="field wide">
+        <label for="encounterRef">關聯就診（選填）</label>
+        <select name="encounterRef" id="encounterRef"><option value="">（不指定）</option></select>
+      </div>` : ""}
+    </div>`;
+}
+
+/** 綁定病人搜尋 / 就診連動。回傳 { reload } 供外部再次觸發。 */
+function bindPatientPicker(host, { initialTerm = "", withEncounter = true, onChange } = {}) {
+  const query = host.querySelector('input[name=patientQuery]');
+  const select = host.querySelector("#patientRef");
+  const hint = host.querySelector("#patientHint");
+  const encSelect = withEncounter ? host.querySelector("#encounterRef") : null;
+
+  async function loadEncounters() {
+    if (!encSelect) return;
+    encSelect.innerHTML = `<option value="">（不指定）</option>`;
+    if (!select.value) return;
+    try {
+      const encounters = bundleEntries(await fhir(`/Encounter?subject=${select.value}&_sort=-date&_count=20`));
+      encounters.forEach(e => {
+        const opt = document.createElement("option");
+        opt.value = `Encounter/${e.id}`;
+        opt.textContent = `${fmtDateTime(e.period?.start)}　${codingText(e.serviceType)}　${encounterClass(e)}`;
+        encSelect.appendChild(opt);
+      });
+    } catch (_) { /* 就診是選填，讀不到不影響主要流程 */ }
+  }
+
+  async function search(term) {
+    const isId = /^[A-Za-z]?\d{4,}$/.test(term);
+    const path = term
+      ? (isId ? `/Patient?identifier=${encodeURIComponent(term)}&_count=20`
+              : `/Patient?name=${encodeURIComponent(term)}&_count=20`)
+      : "/Patient?_count=20&_sort=-_lastUpdated";
+    let patients = bundleEntries(await fhir(path));
+    let fallback = false;
+    if (!patients.length && term) {
+      // DICOM 或外部系統的姓名常與院內病歷不同，查無結果時改列最近建檔的病人。
+      patients = bundleEntries(await fhir("/Patient?_count=20&_sort=-_lastUpdated"));
+      fallback = true;
+    }
+    select.innerHTML = patients.length
+      ? patients.map(p => `<option value="Patient/${esc(p.id)}">${esc(patientName(p))}　${esc(mrnOf(p))}　${esc(GENDER[p.gender] || "")} ${esc(fmtDate(p.birthDate))}</option>`).join("")
+      : `<option value="">查無病人</option>`;
+    hint.textContent = fallback
+      ? `查無「${term}」，改列出最近 ${patients.length} 位病人`
+      : `找到 ${patients.length} 位`;
+    await loadEncounters();
+    if (onChange) await onChange(select.value, encSelect?.value || "");
+  }
+
+  let timer = null;
+  query.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => search(query.value.trim()), 350);
+  });
+  select.addEventListener("change", async () => {
+    await loadEncounters();
+    if (onChange) await onChange(select.value, encSelect?.value || "");
+  });
+  if (encSelect && onChange) {
+    encSelect.addEventListener("change", () => onChange(select.value, encSelect.value));
+  }
+  search(initialTerm);
+  return { search };
+}
+
+/* ============================ 檢驗檢查輸入 ============================ */
+
+const LAB_PRESETS = {
+  cbc: {
+    name: "全套血液檢查 CBC", loinc: "58410-2",
+    items: [
+      ["6690-2", "白血球 WBC", "", "10^3/uL", "3.8 - 10.0"],
+      ["789-8", "紅血球 RBC", "", "10^6/uL", "4.2 - 6.2"],
+      ["718-7", "血紅素 Hgb", "", "g/dL", "13.0 - 17.0"],
+      ["4544-3", "血球容積比 Hct", "", "%", "40 - 52"],
+      ["777-3", "血小板 Platelet", "", "10^3/uL", "150 - 400"],
+    ],
+  },
+  biochem: {
+    name: "生化學檢查 Biochemistry", loinc: "24323-8",
+    items: [
+      ["2345-7", "飯前血糖 Glucose AC", "", "mg/dL", "70 - 100"],
+      ["4548-4", "糖化血色素 HbA1c", "", "%", "4.0 - 6.0"],
+      ["2160-0", "肌酸酐 Creatinine", "", "mg/dL", "0.7 - 1.3"],
+      ["3094-0", "尿素氮 BUN", "", "mg/dL", "8 - 20"],
+      ["2093-3", "總膽固醇 Cholesterol", "", "mg/dL", "< 200"],
+      ["2571-8", "三酸甘油酯 Triglyceride", "", "mg/dL", "< 150"],
+    ],
+  },
+  liver: {
+    name: "肝功能檢查 Liver Function", loinc: "24325-3",
+    items: [
+      ["1742-6", "GOT (AST)", "", "U/L", "10 - 40"],
+      ["1920-8", "GPT (ALT)", "", "U/L", "5 - 40"],
+      ["1975-2", "總膽紅素 Total Bilirubin", "", "mg/dL", "0.2 - 1.2"],
+      ["1751-7", "白蛋白 Albumin", "", "g/dL", "3.5 - 5.0"],
+    ],
+  },
+  urine: {
+    name: "尿液常規檢查 Urinalysis", loinc: "24357-6",
+    items: [
+      ["5811-5", "尿比重 Specific Gravity", "", "", "1.003 - 1.030"],
+      ["5803-2", "尿酸鹼值 pH", "", "", "5.0 - 8.0"],
+      ["2350-7", "尿糖 Glucose", "", "", "陰性"],
+      ["2888-6", "尿蛋白 Protein", "", "", "陰性"],
+    ],
+  },
+};
+
+const SPECIMEN_TYPES = [
+  { value: "", label: "（不建立檢體資料）" },
+  { value: "119297000|靜脈全血", label: "靜脈全血" },
+  { value: "119364003|血清", label: "血清" },
+  { value: "119361006|血漿", label: "血漿" },
+  { value: "122575003|尿液", label: "尿液" },
+  { value: "119334006|痰液", label: "痰液" },
+  { value: "119376003|組織檢體", label: "組織檢體" },
+];
+
+function labRowHtml(item = ["", "", "", "", ""]) {
+  const [loinc, name, value, unit, ref] = item;
+  return `<tr>
+    <td><input name="itemLoinc" value="${esc(loinc)}" placeholder="6690-2" style="width:100%"></td>
+    <td><input name="itemName" value="${esc(name)}" placeholder="白血球 WBC" style="width:100%"></td>
+    <td><input name="itemValue" value="${esc(value)}" placeholder="7.33" style="width:100%"></td>
+    <td><input name="itemUnit" value="${esc(unit)}" placeholder="10^3/uL" style="width:100%"></td>
+    <td><input name="itemRef" value="${esc(ref)}" placeholder="3.8 - 10.0" style="width:100%"></td>
+    <td class="right"><button type="button" class="btn btn-ghost btn-sm" data-remove-row>刪除</button></td>
+  </tr>`;
+}
+
+function newLabReportModal(preset = {}) {
+  openModal({
+    title: "新增檢驗報告",
+    sub: "Observation + Specimen（EMR IG：InspectionCheckObservation / InspectionCheckSpecimen）",
+    submitLabel: "寫入 FHIR",
+    wide: true,
+    bodyHtml: `
+      <div class="form-section">
+        <h3>一、病人與開單 <span class="note">Patient / Encounter</span></h3>
+        ${patientPickerHtml({ label: "受檢病人" })}
+        <div class="form-grid" style="margin-top:12px">
+          ${field("when", "檢驗時間", { type: "datetime-local", value: nowLocalInput(), required: true })}
+          ${field("performer", "檢驗人員", { options: practitionerOptions(), required: true })}
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>二、檢體 <span class="note">Specimen，可留白</span></h3>
+        <div class="form-grid">
+          ${field("specimenType", "檢體種類", { options: SPECIMEN_TYPES })}
+          ${field("collectedAt", "採檢時間", { type: "datetime-local", value: nowLocalInput() })}
+          ${field("collectionSite", "採檢部位", { hint: "例：左上肢肘前靜脈" })}
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>三、檢驗項目 <span class="note">Observation.component</span></h3>
+        <div class="form-grid">
+          ${field("presetKey", "常用套組", { options: [
+            { value: "", label: "（自行輸入）" },
+            { value: "cbc", label: "全套血液檢查 CBC" },
+            { value: "biochem", label: "生化學檢查" },
+            { value: "liver", label: "肝功能檢查" },
+            { value: "urine", label: "尿液常規檢查" },
+          ] })}
+          ${field("panel", "檢驗套組名稱", { required: true, value: "" })}
+          ${field("panelLoinc", "套組 LOINC", { required: true, value: "" })}
+        </div>
+        <div class="table-wrap" style="margin-top:10px">
+          <table class="data" id="labItems">
+            <thead><tr>
+              <th style="width:120px">LOINC</th><th>項目名稱</th>
+              <th style="width:110px">結果</th><th style="width:110px">單位</th>
+              <th style="width:140px">參考值</th><th style="width:70px"></th>
+            </tr></thead>
+            <tbody>${labRowHtml()}${labRowHtml()}${labRowHtml()}</tbody>
+          </table>
+        </div>
+        <button type="button" class="btn btn-sm" id="addLabRow" style="margin-top:8px">＋ 新增一列</button>
+        <span class="muted small" style="margin-left:8px">結果留白的項目不會寫入</span>
+      </div>
+
+      <div class="form-section">
+        <h3>四、判讀與交換單張</h3>
+        <div class="form-grid">
+          ${field("interp", "整體判讀", { options: [
+            { value: "N", label: "正常" }, { value: "H", label: "偏高" },
+            { value: "L", label: "偏低" }, { value: "A", label: "異常" }] })}
+          ${field("note", "備註", { wide: true })}
+        </div>
+        <label class="check-row" style="margin-top:10px">
+          <input type="checkbox" name="makeComposition" value="1" checked>
+          同時產生「檢驗檢查」電子病歷交換單張
+        </label>
+      </div>`,
+    onReady: host => {
+      bindPatientPicker(host, { initialTerm: preset.patientName || "" });
+
+      const tbody = host.querySelector("#labItems tbody");
+      host.querySelector("#addLabRow").addEventListener("click", () => {
+        tbody.insertAdjacentHTML("beforeend", labRowHtml());
+      });
+      tbody.addEventListener("click", event => {
+        if (!event.target.closest("[data-remove-row]")) return;
+        if (tbody.rows.length > 1) event.target.closest("tr").remove();
+      });
+
+      host.querySelector('select[name=presetKey]').addEventListener("change", event => {
+        const p = LAB_PRESETS[event.target.value];
+        if (!p) return;
+        host.querySelector('input[name=panel]').value = p.name;
+        host.querySelector('input[name=panelLoinc]').value = p.loinc;
+        tbody.innerHTML = p.items.map(labRowHtml).join("");
+      });
+    },
+    onSubmit: async form => {
+      const get = k => (form.get(k) || "").trim();
+      const patientRef = get("patientRef");
+      if (!patientRef) throw new Error("請先選擇受檢病人");
+
+      const loincs = form.getAll("itemLoinc");
+      const names = form.getAll("itemName");
+      const values = form.getAll("itemValue");
+      const units = form.getAll("itemUnit");
+      const refs = form.getAll("itemRef");
+      const components = [];
+      loincs.forEach((loinc, i) => {
+        const name = (names[i] || "").trim();
+        const value = (values[i] || "").trim();
+        if (!value) return;                       // 沒有結果的列直接略過
+        if (!name) throw new Error(`第 ${i + 1} 列有結果但沒有項目名稱`);
+        const c = { code: { coding: loinc.trim() ? [{ system: LOINC, code: loinc.trim() }] : undefined, text: name } };
+        if (!Number.isNaN(Number(value))) {
+          c.valueQuantity = { value: Number(value), unit: (units[i] || "").trim() || undefined,
+                              system: "http://unitsofmeasure.org" };
+        } else {
+          c.valueString = value;
+        }
+        if ((refs[i] || "").trim()) c.referenceRange = [{ text: refs[i].trim() }];
+        components.push(c);
+      });
+      if (!components.length) throw new Error("請至少填寫一項檢驗結果");
+
+      const when = toFhirDateTime(get("when"));
+      const encounterRef = get("encounterRef");
+      const entries = [];
+      let specimenRef = "";
+
+      if (get("specimenType")) {
+        const [code, text] = get("specimenType").split("|");
+        specimenRef = "urn:uuid:specimen";
+        entries.push({
+          fullUrl: specimenRef,
+          resource: {
+            resourceType: "Specimen",
+            meta: { profile: [`${EMR_SD}/InspectionCheckSpecimen`] },
+            status: "available",
+            type: { coding: [{ system: SCT, code }], text },
+            subject: { reference: patientRef },
+            collection: {
+              collectedDateTime: get("collectedAt") ? toFhirDateTime(get("collectedAt")) : undefined,
+              bodySite: get("collectionSite") ? { text: get("collectionSite") } : undefined,
+            },
+          },
+          request: { method: "POST", url: "Specimen" },
+        });
+      }
+
+      const interpText = { N: "正常", H: "偏高", L: "偏低", A: "異常" }[get("interp")] || "";
+      const obsRef = "urn:uuid:observation";
+      entries.push({
+        fullUrl: obsRef,
+        resource: {
+          resourceType: "Observation",
+          meta: { profile: [`${EMR_SD}/InspectionCheckObservation`] },
+          status: "final",
+          category: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/observation-category",
+            code: "laboratory", display: "Laboratory" }], text: "Laboratory" }],
+          code: { coding: [{ system: LOINC, code: get("panelLoinc") }], text: get("panel") },
+          subject: { reference: patientRef },
+          encounter: encounterRef ? { reference: encounterRef } : undefined,
+          effectiveDateTime: when,
+          performer: [{ reference: get("performer") }],
+          interpretation: [{ coding: [{ system: "http://terminology.hl7.org/CodeSystem/v3-ObservationInterpretation",
+            code: get("interp") }], text: interpText }],
+          specimen: specimenRef ? { reference: specimenRef } : undefined,
+          note: get("note") ? [{ text: get("note") }] : undefined,
+          component: components,
+        },
+        request: { method: "POST", url: "Observation" },
+      });
+
+      if (get("makeComposition")) {
+        const section = [{
+          title: "檢驗檢查中的檢驗資料",
+          code: { coding: [{ system: LOINC, code: "26436-6" }] },
+          entry: [{ reference: obsRef }],
+        }];
+        if (specimenRef) {
+          section.push({
+            title: "檢驗檢查中的檢體來源",
+            code: { coding: [{ system: LOINC, code: "31208-2" }] },
+            entry: [{ reference: specimenRef }],
+          });
+        }
+        entries.push({
+          fullUrl: "urn:uuid:composition",
+          resource: {
+            resourceType: "Composition",
+            meta: { profile: [`${EMR_SD}/InspectionCheckComposition`] },
+            status: "final",
+            type: { coding: [{ system: LOINC, code: "11502-2", display: "Laboratory report" }], text: "檢驗檢查報告" },
+            subject: { reference: patientRef },
+            encounter: encounterRef ? { reference: encounterRef } : undefined,
+            date: toFhirDateTime(),
+            author: [{ reference: ORG_REF }, { reference: get("performer") }],
+            title: "檢驗檢查報告",
+            custodian: { reference: ORG_REF },
+            section,
+          },
+          request: { method: "POST", url: "Composition" },
+        });
+      }
+
+      const result = await fhir("", { method: "POST", body: { resourceType: "Bundle", type: "transaction", entry: entries } });
+      const created = (result.entry || []).map(e => e.response?.location || "");
+      const compositionId = (created.find(l => l.startsWith("Composition/")) || "").split("/")[1];
+      toast(`已寫入 ${entries.length} 筆 FHIR 資源`);
+      location.hash = compositionId
+        ? `#/document/${compositionId}`
+        : `#/patient/${patientRef.split("/")[1]}/labs`;
+    },
+  });
+}
+
+/* ============================ 交換單張輸入 ============================ */
+
+// 每種單張可納入的章節：LOINC 章節碼、對應資源、預設是否勾選。
+const DOC_SPECS = {
+  PMR: {
+    profile: "PMRComposition", loinc: "34117-2", title: "門診病歷",
+    sections: [
+      { title: "門診病歷中的病人基本資料_重大傷病", loinc: "11338-1", from: "conditions",
+        filter: r => codingCode(r.category?.[0]) === "11338-1" },
+      { title: "門診病歷中的病人基本資料_過敏史", loinc: "10155-0", from: "allergies" },
+      { title: "門診病歷中的病人基本資料_就醫身分別", loinc: "63513-6", from: "coverages" },
+      { title: "門診病歷中的診斷", loinc: "29548-5", from: "conditions",
+        filter: r => codingCode(r.category?.[0]) === "29548-5" },
+      { title: "門診病歷中的診斷病情摘要_主、客觀描述與評估", loinc: "19824-2", from: "impressions" },
+      { title: "門診病歷中的處置項目", loinc: "29554-3", from: "procedures" },
+      { title: "門診病歷中的處方內容", loinc: "29549-3", from: "medications" },
+      { title: "門診病歷中的實驗室檢查紀錄", loinc: "19146-0", from: "labs" },
+    ],
+  },
+  IC: {
+    profile: "InspectionCheckComposition", loinc: "11502-2", title: "檢驗檢查報告",
+    sections: [
+      { title: "檢驗檢查中的檢驗資料", loinc: "26436-6", from: "labs" },
+      { title: "檢驗檢查中的檢體來源", loinc: "31208-2", from: "specimens" },
+    ],
+  },
+  EP: {
+    profile: "Composition-EP", loinc: "57833-6", title: "電子處方箋",
+    sections: [
+      { title: "電子處方箋中的診斷", loinc: "29548-5", from: "conditions" },
+      { title: "電子處方箋中的處方內容", loinc: "29549-3", from: "medications" },
+      { title: "電子處方箋中的就醫身分別", loinc: "63513-6", from: "coverages" },
+    ],
+  },
+  DMS: {
+    profile: "CompositionDMS", loinc: "18842-5", title: "出院病歷摘要",
+    sections: [
+      { title: "出院病摘中的主訴", loinc: "10154-3", from: "conditions",
+        filter: r => codingCode(r.category?.[0]) === "10154-3" },
+      { title: "出院病摘中的出院診斷", loinc: "11535-2", from: "conditions",
+        filter: r => codingCode(r.category?.[0]) !== "10154-3" },
+      { title: "出院病摘中的手術日期及方法", loinc: "10223-6", from: "procedures" },
+      { title: "出院病摘中的檢驗", loinc: "26436-6", from: "labs" },
+      { title: "出院病摘中的出院指示", loinc: "8653-8", from: "carePlans" },
+    ],
+  },
+  IMG: {
+    profile: "ImageComposition", loinc: "18748-4", title: "醫療影像及報告",
+    sections: [
+      { title: "醫療影像及報告中的病史", loinc: "11329-0", from: "conditions" },
+      { title: "醫療影像及報告中的醫學影像內容", loinc: "18748-4", from: "imaging" },
+      { title: "醫療影像及報告中的影像診斷結果", loinc: "18782-3", from: "reports" },
+    ],
+  },
+};
+
+function resourceLabel(r, data) {
+  switch (r.resourceType) {
+    case "Condition":
+      return `${codingText(r.code)}　${codingCode(r.code)}　${fmtDate(r.recordedDate)}`;
+    case "ClinicalImpression": {
+      const code = codingCode(r.code);
+      const tag = code === "61150-9" ? "S" : code === "61149-1" ? "O" : "A";
+      return `[${tag}] ${(r.description || r.summary || "").slice(0, 46)}`;
+    }
+    case "MedicationRequest": {
+      const med = data.medicationMap.get(refId(r.medicationReference));
+      return `${med ? codingText(med.code) : codingText(r.medicationCodeableConcept)}　${r.dosageInstruction?.[0]?.timing?.code?.text || ""}`;
+    }
+    case "Observation":
+      return `${codingText(r.code)}　${fmtDateTime(r.effectiveDateTime || r.effectivePeriod?.start)}　${(r.component || []).length} 項`;
+    case "Procedure":
+      return `${codingText(r.code)}　${fmtDate(r.performedDateTime)}`;
+    case "AllergyIntolerance":
+      return `${codingText(r.code)}　${r.criticality === "high" ? "高風險" : r.criticality || ""}`;
+    case "Coverage":
+      return `就醫身分別：${codingText(r.type)}`;
+    case "CarePlan":
+      return `${r.title || "照護計畫"}　${fmtDate(r.period?.start)}`;
+    case "ImagingStudy":
+      return `${r.description || codingText(r.procedureCode?.[0])}　${fmtDate(r.started)}　${r.numberOfInstances ?? "?"} 張`;
+    case "DiagnosticReport":
+      return `${codingText(r.code)}　${fmtDate(r.issued)}　${r.conclusion ? r.conclusion.slice(0, 30) : ""}`;
+    case "Specimen":
+      return `${codingText(r.type)}　${fmtDate(r.collection?.collectedDateTime)}`;
+    default:
+      return `${r.resourceType}/${r.id}`;
+  }
+}
+
+function newCompositionModal(preset = {}) {
+  let chart = null;
+
+  openModal({
+    title: "新增電子病歷交換單張",
+    sub: "挑選要納入的資料，產生符合 EMR IG 的 Composition，再以 $document 匯出交換 Bundle",
+    submitLabel: "產生單張",
+    wide: true,
+    bodyHtml: `
+      <div class="form-section">
+        <h3>一、病人與就診 <span class="note">選擇就診後只會列出該次就診的資料</span></h3>
+        ${patientPickerHtml({ label: "病人" })}
+      </div>
+
+      <div class="form-section">
+        <h3>二、單張類型</h3>
+        <div class="form-grid">
+          ${field("kind", "單張類型", { value: preset.kind || "PMR", options: Object.entries(DOC_SPECS)
+            .map(([key, spec]) => ({ value: key, label: `${spec.title}（LOINC ${spec.loinc}）` })) })}
+          ${field("author", "撰寫醫師", { options: practitionerOptions(), required: true })}
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h3>三、納入內容 <span class="note">預設全選，可自行勾選</span></h3>
+        <div id="sectionPicker">${loading("請先選擇病人…")}</div>
+      </div>`,
+    onReady: host => {
+      const picker = host.querySelector("#sectionPicker");
+
+      function renderSections() {
+        if (!chart) {
+          picker.innerHTML = `<div class="empty">請先選擇病人</div>`;
+          return;
+        }
+        const kind = host.querySelector('select[name=kind]').value;
+        const encounterRef = host.querySelector("#encounterRef")?.value || "";
+        const spec = DOC_SPECS[kind];
+
+        const pools = {
+          conditions: chart.conditions, impressions: chart.impressions, medications: chart.medications,
+          labs: chart.labs, procedures: chart.procedures, allergies: chart.allergies,
+          coverages: chart.coverages, carePlans: chart.carePlans, imaging: chart.imaging,
+          reports: chart.reports, specimens: chart.specimens,
+        };
+
+        const blocks = spec.sections.map((section, index) => {
+          let items = pools[section.from] || [];
+          if (section.filter) items = items.filter(section.filter);
+          // 過敏、就醫身分別這類病人層級的資料不綁就診，其餘依所選就診過濾。
+          const patientLevel = ["allergies", "coverages", "specimens"].includes(section.from);
+          if (encounterRef && !patientLevel) {
+            items = items.filter(r => refId(r.encounter) === encounterRef);
+          }
+          if (!items.length) {
+            return `<div class="form-section" style="border:none;padding:0;margin:0 0 10px">
+              <h3 style="font-size:12.5px">${esc(section.title)}
+                <span class="note">LOINC ${esc(section.loinc)}</span></h3>
+              <div class="muted small" style="padding-left:11px">（無可納入的資料）</div>
+            </div>`;
+          }
+          return `<div class="form-section" style="border:none;padding:0;margin:0 0 12px">
+            <h3 style="font-size:12.5px">${esc(section.title)}
+              <span class="note">LOINC ${esc(section.loinc)}　${items.length} 筆</span></h3>
+            <div style="padding-left:11px">
+              ${items.map(r => `
+                <label class="check-row" style="padding:2px 0">
+                  <input type="checkbox" name="pick" value="${esc(index)}|${esc(r.resourceType)}/${esc(r.id)}" checked>
+                  <span>${esc(resourceLabel(r, chart))}</span>
+                </label>`).join("")}
+            </div>
+          </div>`;
+        }).join("");
+
+        picker.innerHTML = blocks || `<div class="empty">這位病人沒有可納入的資料</div>`;
+      }
+
+      host.querySelector('select[name=kind]').addEventListener("change", renderSections);
+
+      bindPatientPicker(host, {
+        initialTerm: preset.patientName || "",
+        onChange: async patientRef => {
+          if (!patientRef) { chart = null; renderSections(); return; }
+          picker.innerHTML = loading("讀取病人資料…");
+          try {
+            chart = await loadPatientChart(patientRef.split("/")[1]);
+            chart.specimens = bundleEntries(await fhir(`/Specimen?subject=${patientRef}&_count=50`)).map(cacheRaw);
+          } catch (e) {
+            picker.innerHTML = `<div class="empty">讀取失敗：${esc(e.message)}</div>`;
+            return;
+          }
+          renderSections();
+        },
+      });
+    },
+    onSubmit: async form => {
+      const patientRef = (form.get("patientRef") || "").trim();
+      if (!patientRef) throw new Error("請先選擇病人");
+      const kind = form.get("kind");
+      const spec = DOC_SPECS[kind];
+      const encounterRef = (form.get("encounterRef") || "").trim();
+
+      const picked = form.getAll("pick");
+      if (!picked.length) throw new Error("請至少勾選一筆要納入單張的資料");
+
+      const grouped = new Map();
+      picked.forEach(value => {
+        const [index, ref] = value.split("|");
+        if (!grouped.has(index)) grouped.set(index, []);
+        grouped.get(index).push(ref);
+      });
+
+      const section = [...grouped.entries()]
+        .sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([index, refs]) => ({
+          title: spec.sections[Number(index)].title,
+          code: { coding: [{ system: LOINC, code: spec.sections[Number(index)].loinc }] },
+          entry: refs.map(r => ({ reference: r })),
+        }));
+
+      const created = await fhir("/Composition", {
+        method: "POST",
+        body: {
+          resourceType: "Composition",
+          meta: { profile: [`${EMR_SD}/${spec.profile}`] },
+          status: "final",
+          type: { coding: [{ system: LOINC, code: spec.loinc }], text: spec.title },
+          subject: { reference: patientRef },
+          encounter: encounterRef ? { reference: encounterRef } : undefined,
+          date: toFhirDateTime(),
+          author: [{ reference: ORG_REF }, { reference: form.get("author") }],
+          title: spec.title,
+          custodian: { reference: ORG_REF },
+          section,
+        },
+      });
+      toast(`已產生${spec.title}（${section.length} 個章節、${picked.length} 筆資料）`);
       location.hash = `#/document/${created.id}`;
     },
   });
@@ -1449,58 +1972,8 @@ async function linkImagingModal(orthancStudyId) {
         existingBlock.hidden = isNew;
         newBlock.hidden = !isNew;
       }));
-
-      const query = host.querySelector('input[name=patientQuery]');
-      const select = host.querySelector("#patientRef");
-      const hint = host.querySelector("#patientHint");
-      const encSelect = host.querySelector("#encounterRef");
-
-      async function search(term) {
-        const isId = /^[A-Za-z]?\d{4,}$/.test(term);
-        const path = term
-          ? (isId ? `/Patient?identifier=${encodeURIComponent(term)}&_count=20`
-                  : `/Patient?name=${encodeURIComponent(term)}&_count=20`)
-          : "/Patient?_count=20&_sort=-_lastUpdated";
-        let patients = bundleEntries(await fhir(path));
-        if (!patients.length && term) {
-          // DICOM 上的姓名通常和院內病歷姓名不同，查無結果時退回列出最近建檔的病人。
-          patients = bundleEntries(await fhir("/Patient?_count=20&_sort=-_lastUpdated"));
-          hint.dataset.fallback = "1";
-        } else {
-          delete hint.dataset.fallback;
-        }
-        select.innerHTML = patients.length
-          ? patients.map(p => `<option value="Patient/${esc(p.id)}">${esc(patientName(p))}　${esc(mrnOf(p))}　${esc(GENDER[p.gender] || "")} ${esc(fmtDate(p.birthDate))}</option>`).join("")
-          : `<option value="">查無病人</option>`;
-        hint.textContent = hint.dataset.fallback
-          ? `查無「${term}」，改列出最近 ${patients.length} 位病人`
-          : `找到 ${patients.length} 位`;
-        loadEncounters();
-      }
-
-      async function loadEncounters() {
-        const ref = select.value;
-        encSelect.innerHTML = `<option value="">（不指定）</option>`;
-        if (!ref) return;
-        try {
-          const encounters = bundleEntries(await fhir(`/Encounter?subject=${ref}&_sort=-date&_count=20`));
-          encounters.forEach(e => {
-            const opt = document.createElement("option");
-            opt.value = `Encounter/${e.id}`;
-            opt.textContent = `${fmtDateTime(e.period?.start)}　${codingText(e.serviceType)}`;
-            encSelect.appendChild(opt);
-          });
-        } catch (_) { /* 就診是選填，讀不到就算了 */ }
-      }
-
-      let timer = null;
-      query.addEventListener("input", () => {
-        clearTimeout(timer);
-        timer = setTimeout(() => search(query.value.trim()), 350);
-      });
-      select.addEventListener("change", loadEncounters);
-      // 先用 DICOM 病人姓名試著自動找出對應病人
-      search(suggestedName || "");
+      // 先用 DICOM 上的病人姓名試著找出對應病人
+      bindPatientPicker(host, { initialTerm: suggestedName || "" });
     },
     onSubmit: async form => {
       const get = k => (form.get(k) || "").trim();
@@ -1716,10 +2189,14 @@ async function viewDocuments() {
   render(`
     <div class="page-head">
       <div><span class="kicker">Composition</span><h1>電子病歷交換單張</h1></div>
-      <div class="page-actions"><button class="btn" id="reloadDocs">重新整理</button></div>
+      <div class="page-actions">
+        ${canWrite() ? `<button class="btn btn-primary" id="newDocBtn">＋ 新增交換單張</button>` : ""}
+        <button class="btn" id="reloadDocs">重新整理</button>
+      </div>
     </div>
     <section class="card"><div class="card-body tight" id="docList">${loading()}</div></section>`);
   $("reloadDocs").addEventListener("click", loadDocuments);
+  if ($("newDocBtn")) $("newDocBtn").addEventListener("click", () => newCompositionModal());
   loadDocuments();
 }
 
@@ -1965,9 +2442,15 @@ async function viewImaging() {
 async function viewLabs() {
   render(`
     <div class="page-head">
-      <div><span class="kicker">Observation · laboratory</span><h1>檢驗檢查總覽</h1></div>
+      <div><span class="kicker">Observation · laboratory</span><h1>檢驗檢查</h1></div>
+      <div class="page-actions">
+        ${canWrite() ? `<button class="btn btn-primary" id="newLabReportBtn">＋ 新增檢驗報告</button>` : ""}
+        <button class="btn" id="reloadLabs">重新整理</button>
+      </div>
     </div>
     <section class="card"><div class="card-body tight" id="labList">${loading()}</div></section>`);
+  if ($("newLabReportBtn")) $("newLabReportBtn").addEventListener("click", () => newLabReportModal());
+  $("reloadLabs").addEventListener("click", viewLabs);
   try {
     const bundle = await fhir("/Observation?category=laboratory&_sort=-date&_count=100&_include=Observation:subject");
     const all = bundleEntries(bundle);
@@ -2067,6 +2550,14 @@ function showApp() {
   $("userName").textContent = name;
   $("userAvatar").textContent = name.slice(0, 1).toUpperCase();
   $("userRoles").textContent = KcAuth.roles().filter(r => r.startsWith("fhir") || r === "admin").join(" · ") || "無 FHIR 權限";
+  // 管理捷徑：Keycloak 只給 admin，FHIR Server 測試頁只給 fhir-admin（與閘道規則一致）
+  const kcLink = $("keycloakAdminLink");
+  kcLink.href = `${KcAuth.keycloakBase}/admin/master/console/#/${KcAuth.realm}`;
+  kcLink.hidden = !KcAuth.hasRole("admin");
+  const fhirLink = $("fhirServerLink");
+  fhirLink.href = `${FHIR_SERVER_BASE}/`;
+  fhirLink.hidden = !KcAuth.hasRole("admin", "fhir-admin");
+
   const badge = $("writeBadge");
   badge.textContent = canWrite() ? "可建檔" : "唯讀";
   badge.className = `pill ${canWrite() ? "pill-ok" : "pill-quiet"}`;

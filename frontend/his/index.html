@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>電子病歷交換平台 · 示範醫學中心</title>
-  <link rel="stylesheet" href="/his/his.css?v=20260814-link2" />
+  <link rel="stylesheet" href="/his/his.css?v=20260817-tls" />
 </head>
 <body>
   <div id="app" class="app" hidden>
@@ -25,7 +26,9 @@
       </form>
 
       <div class="topbar-right">
-        <a class="topbar-link" href="/" title="回到 DICOM 影像上傳入口">影像入口</a>
+        <a class="topbar-link" href="/upload/" title="回到 DICOM 影像上傳與管理入口">影像上傳管理入口</a>
+        <a class="topbar-link" id="keycloakAdminLink" href="#" target="_blank" rel="noopener" hidden>Keycloak 管理</a>
+        <a class="topbar-link" id="fhirServerLink" href="#" target="_blank" rel="noopener" hidden>FHIR Server</a>
         <div class="user-chip">
           <span class="user-avatar" id="userAvatar">—</span>
           <span class="user-meta">
@@ -100,8 +103,8 @@
   <div id="modalHost" class="modal-host" hidden></div>
   <div id="toastHost" class="toast-host" aria-live="polite"></div>
 
-  <script src="/session-timeout.js?v=20260814-idle"></script>
-  <script src="/keycloak-auth.js?v=20260814-idle"></script>
-  <script src="/his/his.js?v=20260814-link2"></script>
+  <script src="/session-timeout.js?v=20260817-tls"></script>
+  <script src="/keycloak-auth.js?v=20260817-tls"></script>
+  <script src="/his/his.js?v=20260817-tls"></script>
 </body>
 </html>

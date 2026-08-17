@@ -76,119 +76,95 @@ docker compose -f docker-compose.yml -f docker-compose.wazuh.yml up --build
 開啟：
 
 ```text
-客戶入口：http://localhost:8088
-Keycloak：http://localhost:8080
-Orthanc 管理入口：http://localhost:18042
-OHIF：http://localhost:13000
-Wazuh 入口：http://localhost:15601
-HAPI FHIR：http://localhost:18090/fhir
-電子病歷交換平台：http://localhost:8088/his/
-Backend API：http://localhost:18000/docs
+主入口（https）：https://localhost:8088/  →  自動導向電子病歷交換平台
+電子病歷交換平台：https://localhost:8088/his/
+DICOM 影像上傳管理入口：https://localhost:8088/upload/
+Keycloak：https://localhost:8443
+Orthanc 管理入口：https://localhost:18042
+OHIF：https://localhost:13000
+Wazuh 入口：https://localhost:15601
+HAPI FHIR：https://localhost:18090/fhir
 ```
 
-### Port 對照
+第一次連會出現自我簽署憑證的警告（見下方「HTTPS 與對外 port」），選「進階 → 繼續前往」。
 
-為了避免和本機常見服務衝突，compose 只保留 Keycloak 的 `8080` 與客戶入口的 `8088`，其他服務改用高位 host port。
-Docker 內部服務仍使用原本 container port，不影響容器之間通訊。
+## HTTPS 與對外 port
 
-| 服務 | Host port | Container port | 說明 |
-| --- | ---: | ---: | --- |
-| Frontend / 客戶入口 | `8088` | `80` | 客戶登入、上傳、清單 |
-| Keycloak | `8080` | `8080` | SSO 與管理後台 |
-| Backend API | `18000` | `8000` | FastAPI / Swagger |
-| Orthanc 管理代理 | `18042` | `8042` | 經 Nginx 權限保護 |
-| OHIF | `13000` | `80` | Viewer |
-| Orthanc DICOM | `14242` | `4242` | DICOM C-STORE 等 |
-| PostgreSQL | `15432` | `5432` | 本機 debug 用 |
-| Wazuh Dashboard 代理 | `15601` | `5601` | 經 Nginx 權限保護 |
-| HAPI FHIR 代理 | `18090` | `8090` | 經 Nginx 權限保護，FHIR base 為 `/fhir` |
-| Wazuh Indexer | `19200` | `9200` | debug 用 |
-| Wazuh Manager API | `55001` | `55000` | debug 用 |
-| Wazuh agent | `11514` | `1514` | agent event |
-| Wazuh enrollment | `11515` | `1515` | agent enrollment |
-| Wazuh syslog | `5514/udp` | `514/udp` | syslog |
-
-### Port 使用方式
-
-一般日常使用只需要開這幾個網址：
+所有網頁入口都走 https，由 frontend 的 nginx 統一終結 TLS；後端服務（Keycloak、OHIF、
+HAPI FHIR、Orthanc、backend、PostgreSQL）都不再直接對外開 port。
 
 ```text
-客戶使用者入口      http://localhost:8088
-Keycloak 管理後台   http://localhost:8080/admin
-Orthanc 管理入口    http://localhost:18042
-OHIF Viewer         http://localhost:13000
-Wazuh Dashboard     http://localhost:15601
-電子病歷交換平台    http://localhost:8088/his/
-HAPI FHIR Server    http://localhost:18090（FHIR base：http://localhost:18090/fhir）
+瀏覽器 ──https──> nginx（單一 TLS 終結點）──http──> keycloak / ohif / hapi-fhir / orthanc / backend
 ```
 
-開發與除錯時才需要直接使用這些 port：
+### 憑證
 
-```text
-Backend Swagger     http://localhost:18000/docs
-PostgreSQL          localhost:15432
-Wazuh Indexer       https://localhost:19200
-Wazuh Manager API   https://localhost:55001
-Orthanc DICOM       localhost:14242
-```
-
-Wazuh agent 連線請使用這些 host port：
-
-```text
-Agent event         localhost:11514
-Agent enrollment    localhost:11515
-Syslog UDP          localhost:5514
-```
-
-不要再使用舊的 host port `3000`、`5601`、`8042`、`8000`。這些已改成 `13000`、`15601`、`18042`、`18000`，用來避免和本機其他服務衝突。
-
-若從同一個 LAN 以固定 IP 存取，也可以把 `localhost` 換成伺服器 IP，例如：
-
-```text
-客戶入口：http://192.168.1.112:8088
-Keycloak：http://192.168.1.112:8080
-Orthanc 管理入口：http://192.168.1.112:18042
-OHIF：http://192.168.1.112:13000
-Wazuh 入口：http://192.168.1.112:15601
-HAPI FHIR：http://192.168.1.112:18090/fhir
-電子病歷交換平台：http://192.168.1.112:8088/his/
-```
-
-`http://localhost:18042` 不是直接暴露 Orthanc，而是經由 Nginx 保護的 Orthanc 管理入口。
-請先到 `http://localhost:8088` 用具備 `admin` role 的 Keycloak 帳號登入，再開啟 Orthanc 管理入口。
-未登入或非 admin 使用者會被導回客戶入口。
-
-`http://localhost:15601` 是經由 Nginx 保護的 Wazuh Dashboard 入口。使用者必須先在
-`http://localhost:8088` 登入，並具備 `admin`、`wazuh-admin` 或 `wazuh-readonly` 其中一種 role。
-Wazuh stack 預設不會跟主系統一起啟動，請見「Wazuh 整合」。
-
-如果啟動時看到 `bind: address already in use`，代表本機已有其他程式佔用對應 port。
-目前 compose 避開常見 port，主要對外 port 是 `8088`, `8080`, `18042`, `13000`, `15601`, `18000`。
-可先查詢並停止佔用者：
+自我簽署，有效期 10 年，SAN 已含 `localhost`、`127.0.0.1`、`192.168.1.122`、
+`192.168.1.112`、`192.168.1.105`：
 
 ```bash
-lsof -nP -iTCP:<PORT> -sTCP:LISTEN
-kill <PID>
+sh nginx/generate-cert.sh                  # 用預設 IP 清單重新產生
+sh nginx/generate-cert.sh 192.168.1.50     # 追加其他 IP / 網域到 SAN
+docker compose restart frontend            # 換憑證後要重載 nginx
 ```
 
-或將 `docker-compose.yml` 內對應服務的左側 host port 改成其他值，並同步調整前端連結或
-`OHIF_VIEWER_URL`。
+檔案在 `nginx/certs/`（`dicom-portal.crt` / `dicom-portal.key`），以唯讀掛進容器。
+因為是自我簽署，瀏覽器第一次連會顯示「不安全」警告，選「進階 → 繼續前往」即可；
+正式環境請改用院內 CA 或 Let's Encrypt 簽發的憑證。
 
-如果登入後看到 `/api/me failed: 502 Bad Gateway`，通常是 backend 容器重建後，frontend Nginx
-仍連到舊的 backend container IP。先確認 backend 本身正常：
+### 對外 port
 
-```bash
-curl -s -D - http://localhost:18000/docs
+| 用途 | Port | 協定 | 說明 |
+| --- | ---: | --- | --- |
+| 主入口（電子病歷平台 + 上傳入口 + /api + /fhir + DICOMweb） | `8088` | HTTPS | 日常只需要這個 |
+| HTTP 轉址 | `80` | HTTP | 只做 `301 → https://<host>:8088`，不提供任何內容 |
+| Keycloak | `8443` | HTTPS | 經 nginx 反向代理，容器本身不對外 |
+| OHIF Viewer | `13000` | HTTPS | 經 nginx 反向代理 |
+| Orthanc 管理入口 | `18042` | HTTPS | Keycloak 授權閘道，需 `admin` |
+| Wazuh Dashboard | `15601` | HTTPS | Keycloak 授權閘道 |
+| HAPI FHIR 對外 API | `18090` | HTTPS | Keycloak 授權閘道 |
+| Orthanc DICOM | `14242` | DICOM | C-STORE 等影像設備連線 |
+| Wazuh agent | `11514` / `11515` / `5514(udp)` | — | agent 連線與 syslog |
+
+已關閉（改由 `docker compose exec` 維修）：
+
+```text
+8080   Keycloak 直連      → 改走 https://<host>:8443
+18000  Backend 直連       → 改走 https://<host>:8088/api/
+15432  PostgreSQL         → docker compose exec postgres psql -U dicom -d dicom_portal
+19200  Wazuh Indexer      → docker compose exec wazuh-indexer curl ...
+55001  Wazuh Manager API  → docker compose exec wazuh-manager ...
+13000  OHIF 容器直連      → 改由 nginx 代理（對外 port 不變，但已是 https）
 ```
 
-若 backend 回 `200 OK`，重啟 frontend 讓 Nginx 重新解析 backend：
+日常網址：
 
-```bash
-docker compose -f docker-compose.yml -f docker-compose.wazuh.yml restart frontend
+```text
+主入口          https://192.168.1.122:8088/        （導向 /his/）
+電子病歷平台    https://192.168.1.122:8088/his/
+影像上傳管理    https://192.168.1.122:8088/upload/
+Keycloak 管理   https://192.168.1.122:8443/admin
+Orthanc 管理    https://192.168.1.122:18042
+OHIF Viewer     https://192.168.1.122:13000
+FHIR base       https://192.168.1.122:8088/fhir（同源）或 https://192.168.1.122:18090/fhir（對外）
+Wazuh           https://192.168.1.122:15601
 ```
 
-再重新整理 `http://localhost:8088`。修正後，未登入狀態下 `/api/me` 應回 `401 Missing token`，而不是
-`502 Bad Gateway`。
+### 換 IP 時要一起改的地方
+
+TLS 之後 Keycloak 的 issuer 會變成 `https://<host>:8443/realms/dicom`，
+backend 驗證 token 時會比對 issuer，所以換 IP 時要同步：
+
+```text
+nginx/generate-cert.sh          把新 IP 加進憑證 SAN
+docker-compose.yml              KEYCLOAK_ISSUER / KEYCLOAK_ALLOWED_ISSUERS / CORS_ORIGIN
+                                OHIF_VIEWER_URL / DICOMWEB_PUBLIC_URL
+keycloak/realm-dicom.json       client 的 redirectUris / webOrigins（或用 kcadm 直接改）
+```
+
+前端不用改：`app.js`、`keycloak-auth.js`、OHIF 的 `app-config.js` 都是依當前網址的
+protocol 與 hostname 自動組出 Keycloak（https → 8443）與各服務位址。
+
 
 ## VM 建議規格
 
@@ -307,6 +283,7 @@ accessTokenLifespan     1200    access token 20 分鐘，前端會在到期前�
 Keycloak 端 session 已達上限而換不到新 token。修改匯入檔後要套用到執行中的環境：
 
 ```bash
+# --server 是容器「內部」的位址，維持 http://localhost:8080 即可（TLS 在 nginx 終結）
 docker compose exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
   --server http://localhost:8080 --realm master --user admin --password admin
 docker compose exec keycloak /opt/keycloak/bin/kcadm.sh update realms/dicom \
@@ -341,7 +318,7 @@ claim 判斷資料歸屬；沒有 `admin` role 的使用者只會看到同一個
 
 管理者審核流程：
 
-1. 開啟 `http://localhost:8080/admin`。
+1. 開啟 `https://localhost:8443/admin`。
 2. 使用 Keycloak 管理帳號登入，並切換到 `dicom` realm。
 3. 到 `Users` 找到新註冊的使用者。
 4. 在 `Details` 設定 `tenant_id`，例如 `tenant-a`。
@@ -377,7 +354,7 @@ docker exec dicomsso-keycloak-1 /opt/keycloak/bin/kcadm.sh \
 
 ### 使用 Keycloak 管理後台
 
-1. 開啟 `http://localhost:8080/admin`。
+1. 開啟 `https://localhost:8443/admin`。
 2. 使用 Keycloak 管理帳號登入：
 
 ```text
@@ -427,7 +404,7 @@ Wazuh 唯讀：wazuh-readonly
 
 如果仍然找不到，請確認左上角目前 realm 是 `dicom`，不是 `master`。
 
-9. 從 `http://localhost:8088` 按「SSO 登入」，使用新帳號登入測試。
+9. 從 `https://localhost:8088` 按「SSO 登入」，使用新帳號登入測試。
 
 如果不想調整 User profile，也可以直接用下面 CLI 寫入 `tenant_id`，效果相同。
 
@@ -684,8 +661,8 @@ FastAPI 查詢時加上 WHERE tenant_id = 使用者 tenant_id
 系統另外啟動一台 HAPI FHIR JPA Server（`hapiproject/hapi`），資料存在同一台 PostgreSQL 的 `hapi` 資料庫。
 
 ```text
-FHIR base URL：http://localhost:18090/fhir
-測試用網頁 UI：http://localhost:18090/
+FHIR base URL：https://localhost:18090/fhir
+測試用網頁 UI：https://localhost:18090/
 ```
 
 ### 授權架構
@@ -709,7 +686,7 @@ Nginx 不會把使用者的 token 往 HAPI 送，避免 token 落在 HAPI 的 lo
 
 ### 角色與權限
 
-| Realm role | `/fhir` REST API | HAPI 內建測試頁（`http://localhost:18090/`） |
+| Realm role | `/fhir` REST API | HAPI 內建測試頁（`https://localhost:18090/`） |
 | --- | --- | --- |
 | `fhir-user` | 讀取：`GET`、`HEAD`、`_search` 等 | ✗ 導回入口網站 |
 | `fhir-admin` | 讀取 + 寫入：`POST`、`PUT`、`PATCH`、`DELETE` | ✓ |
@@ -739,6 +716,7 @@ portal-admin              fhir-user + fhir-admin
 或用 CLI：
 
 ```bash
+# --server 是容器「內部」的位址，維持 http://localhost:8080 即可（TLS 在 nginx 終結）
 docker compose exec keycloak /opt/keycloak/bin/kcadm.sh config credentials \
   --server http://localhost:8080 --realm master --user admin --password admin
 docker compose exec keycloak /opt/keycloak/bin/kcadm.sh add-roles \
@@ -771,33 +749,34 @@ docker compose logs -f hapi-fhir | grep "Started Application"
 
 ```bash
 # 1. 未帶 token → 401
-curl -i http://localhost:18090/fhir/metadata
+curl -i https://localhost:18090/fhir/metadata
 
 # 2. 取得 token
-TOKEN=$(curl -s -X POST http://localhost:8080/realms/dicom/protocol/openid-connect/token \
+TOKEN=$(curl -sk -X POST https://localhost:8443/realms/dicom/protocol/openid-connect/token \
   -d grant_type=password -d client_id=dicom-portal \
   -d username=portal-admin -d password=portal-admin | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # 3. 讀 CapabilityStatement → 200
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" \
-  http://localhost:18090/fhir/metadata
+  https://localhost:18090/fhir/metadata
 
 # 4. 建立 Patient（需要 fhir-admin）→ 201
-curl -i -X POST http://localhost:18090/fhir/Patient \
+curl -i -X POST https://localhost:18090/fhir/Patient \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/fhir+json" \
   -d '{"resourceType":"Patient","name":[{"family":"Wang","given":["Test"]}]}'
 
 # 5. 查詢
-curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:18090/fhir/Patient?family=Wang"
+curl -s -H "Authorization: Bearer $TOKEN" "https://localhost:18090/fhir/Patient?family=Wang"
 ```
 
 只有 `fhir-user` 的帳號執行第 4 步會拿到 `403`，這就是讀寫分權的驗收點。
 
 ### 瀏覽器操作
 
-在客戶入口 `http://localhost:8088` 用有 FHIR role 的帳號登入後，右上角會出現 **FHIR Server** 連結。
-登入時寫入的 `kc_token` cookie 是以主機名為範圍（不分 port），所以點進 `http://localhost:18090/`
-的 HAPI 測試頁時會自動帶上，不需要再登入一次。沒有 `fhir-admin` 的帳號會被導回 `http://localhost:8088`。
+在電子病歷交換平台（`https://localhost:8088/his/`）的上方工具列，有 `admin` / `fhir-admin` 的帳號
+會看到 **FHIR Server** 連結。登入時寫入的 `kc_token` cookie 是以主機名為範圍（不分 port），
+所以點進 `https://localhost:18090/` 的 HAPI 測試頁時會自動帶上，不需要再登入一次。
+沒有 `fhir-admin` 的帳號會被導回 `https://localhost:8088`。
 
 測試頁上顯示的 **FHIR Base** 會是 `http://localhost:8080/fhir`，這是正常的：那是測試頁的 Java 程式
 在容器內部自己要連的位址（設定在 `fhir/application.yaml` 的 `tester.home.server_address`），
@@ -806,8 +785,8 @@ curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:18090/fhir/Patient?f
 **外部程式要用的 FHIR base 一律是 `http://<host>:18090/fhir`**，例如：
 
 ```text
-http://localhost:18090/fhir
-http://192.168.1.112:18090/fhir
+https://localhost:18090/fhir
+https://192.168.1.112:18090/fhir
 ```
 
 走 `:18090` 的請求，HAPI 會依 Nginx 帶進來的 `X-Forwarded-Host` 產生正確的 `fullUrl` 與
@@ -827,11 +806,11 @@ http://192.168.1.112:18090/fhir
 帳號與讀寫權限一樣由 Keycloak 控管。
 
 ```text
-入口：http://localhost:8088/his/
+入口：https://localhost:8088/his/
 規格：https://twcore.mohw.gov.tw/ig/emr/
 ```
 
-登入後在客戶入口右上角也會出現「電子病歷交換平台」連結（需要 FHIR role 才看得到）。
+主入口就是這個平台；DICOM 影像上傳管理入口在 `/upload/`，兩邊的上方工具列可以互相切換，登入狀態共用。
 
 ### 畫面與功能
 
@@ -892,7 +871,7 @@ python3 fhir/seed/seed_emr.py
 要換伺服器或改用區網 IP：
 
 ```bash
-python3 fhir/seed/seed_emr.py --base http://192.168.1.112:18090/fhir --keycloak http://192.168.1.112:8080
+python3 fhir/seed/seed_emr.py --base https://192.168.1.112:18090/fhir --keycloak http://192.168.1.112:8080
 python3 fhir/seed/seed_emr.py --dry-run     # 只印 JSON 不寫入，可用來對照規格
 ```
 
@@ -904,20 +883,60 @@ python3 fhir/seed/seed_emr.py --dry-run     # 只印 JSON 不寫入，可用來�
 新增病人      建立 Patient（身分證 identifier 用 http://www.moi.gov.tw，病歷號用 type=MR）
 新增門診就診  一次 FHIR transaction 建立 Encounter + Condition + ClinicalImpression(S/O/A)
 開立處方      一次 transaction 建立 Medication + MedicationRequest
-登錄檢驗結果  建立含多個 component 的 Observation，超出參考值會自動標紅並標示 H / L
-產生交換單張  蒐集該次就診的資源組成 Composition，再用 $document 匯出交換 Bundle
+新增檢驗報告  Specimen + Observation（含多個 component），可一併產生檢驗檢查單張
+影像歸戶      Orthanc 檢查 → ImagingStudy + DiagnosticReport + Observation + Endpoint
+新增交換單張  逐筆勾選要納入的資料組成 Composition，再用 $document 匯出交換 Bundle
 ```
 
 ### 同源 FHIR 入口
 
-Portal 走 `http://localhost:8088/fhir`（與網頁同源，避免瀏覽器 CORS），
-外部系統走 `http://localhost:18090/fhir`。兩條路徑的授權檢查完全相同，
+Portal 走 `https://localhost:8088/fhir`（與網頁同源，避免瀏覽器 CORS），
+外部系統走 `https://localhost:18090/fhir`。兩條路徑的授權檢查完全相同，
 都是 Nginx `auth_request` → `backend /api/auth/fhir`。
 
 ```text
 瀏覽器 /his/  →  同源 /fhir   →  auth_request  →  HAPI FHIR
 外部程式      →  :18090/fhir  →  auth_request  →  HAPI FHIR
 ```
+
+### 檢驗檢查輸入頁
+
+入口：左側「檢驗檢查」→「＋ 新增檢驗報告」（需 `fhir-admin`）。
+病歷內的檢驗分頁按「＋ 登錄檢驗結果」開的是同一張表單，只是會自動帶入該病人。
+
+```text
+一、病人與開單   搜尋病人（姓名/病歷號/身分證）、關聯就診、檢驗時間、檢驗人員
+二、檢體         檢體種類（靜脈全血/血清/血漿/尿液/痰液/組織）、採檢時間、採檢部位 → Specimen
+三、檢驗項目     常用套組一鍵帶入（CBC／生化／肝功能／尿液常規），
+                 明細以表格逐列輸入 LOINC、項目名稱、結果、單位、參考值，可自由增刪列
+四、判讀與單張   整體判讀（正常/偏高/偏低/異常）、備註、是否同時產生檢驗檢查交換單張
+```
+
+結果欄留白的列不會寫入，方便先把套組帶出來再填有做的項目。
+送出後以一個 transaction 寫入 `Specimen` + `Observation`（+ `Composition`），
+超出參考值的項目在病歷與單張上會自動標紅並標示 H / L。
+
+### 電子病歷交換單張輸入頁
+
+入口：左側「交換單張」→「＋ 新增交換單張」（需 `fhir-admin`）。
+
+```text
+一、病人與就診   搜尋病人；選了就診就只列出該次就診的資料，不選則列出病人全部資料
+二、單張類型     門診病歷 PMR／檢驗檢查 IC／電子處方箋 EP／出院病摘 DMS／醫療影像及報告 IMG
+                 撰寫醫師
+三、納入內容     依單張類型自動列出各章節可納入的資源，逐筆勾選（預設全選）
+```
+
+第三段是這頁的重點：它會依 EMR IG 各單張的章節定義，把病人已有的診斷、SOAP、處方、
+檢驗、處置、過敏、就醫身分別、影像、出院指示分別放進對應章節，每一筆都有勾選框，
+只有勾選的會寫進 `Composition.section.entry`。切換單張類型時清單會即時重算。
+
+過敏史、就醫身分別、檢體屬於病人層級的資料，選了就診也不會被過濾掉。
+
+產生後直接跳到單張檢視頁，可列印或用 `$document` 下載交換 Bundle。
+
+原本在病歷「就診紀錄」列上的「產生單張」仍然保留，那是快捷版：
+直接把該次就診的資料全部納入，不用逐筆勾選。
 
 ### Orthanc 影像如何連動到 FHIR
 
@@ -967,7 +986,7 @@ DICOM 上的病人姓名常常和院內病歷姓名不同（例如英文名或�
 | ImagingStudy | `ImagingStudyBase` | Study/Series/Instance UID、Modality、系列與影像數、Endpoint |
 | DiagnosticReport | `DiagnosticReport-Image` | 報告狀態、判讀醫師、結論，連到 ImagingStudy 與 Observation |
 | Observation | `Observation-Imaging-Result` | 影像所見（valueString） |
-| Endpoint | `MitwEndpoint` | DICOMweb 位址，預設 `http://localhost:8088/dicom-web` |
+| Endpoint | `MitwEndpoint` | DICOMweb 位址，預設 `https://<host>:8088/dicom-web` |
 | Composition | `ImageComposition` | 醫療影像及報告交換單張（選填） |
 
 歸戶後在病人的「醫療影像」分頁就會看到報告，並可按「在 OHIF 開啟」直接看片——
@@ -979,7 +998,7 @@ DICOM 上的病人姓名常常和院內病歷姓名不同（例如英文名或�
 DICOMweb 對外位址若不是預設值（例如改用區網 IP），在 `.env` 設定：
 
 ```bash
-DICOMWEB_PUBLIC_URL=http://192.168.1.112:8088/dicom-web
+DICOMWEB_PUBLIC_URL=https://192.168.1.112:8088/dicom-web
 ```
 
 ### 與 DICOM / 影像系統的關係
@@ -1145,7 +1164,7 @@ admin / wazuh-admin / wazuh-readonly -> 可進入 Wazuh
 其他使用者                         -> 導回 http://localhost:8088
 ```
 
-因此日常使用時請從 `http://localhost:8088` 先用 Keycloak SSO 登入；有 Wazuh 權限的使用者會看到
+因此日常使用時請從 `https://localhost:8088` 先用 Keycloak SSO 登入；有 Wazuh 權限的使用者會看到
 `Wazuh` 連結，點進去會直接進入 Wazuh Dashboard，不需要另外輸入 Wazuh 密碼。
 
 ### Wazuh 本身的 Keycloak 權限
@@ -1221,9 +1240,11 @@ wazuh-readonly -> readonly
 backend/
   FastAPI 後端
 frontend/
-  靜態前端，上傳與清單頁
+  靜態前端（主入口 / 會導向 his）
 frontend/his/
-  電子病歷交換平台（FHIR Portal）前端
+  電子病歷交換平台（FHIR Portal）前端，也是主入口
+frontend/upload/
+  DICOM 影像上傳管理入口
 frontend/keycloak-auth.js
   兩個前端共用的 Keycloak PKCE 登入模組
 frontend/session-timeout.js
@@ -1248,20 +1269,20 @@ docker-compose.yml
 清單 API 會產生：
 
 ```text
-http://localhost:13000/viewer/<StudyInstanceUID>
+https://localhost:13000/viewer/<StudyInstanceUID>
 ```
 
-本機開發環境會啟動 OHIF viewer，並透過 frontend Nginx 將 `http://localhost:8088/dicom-web/`
+本機開發環境會啟動 OHIF viewer，並透過 frontend Nginx 將 `https://<host>:8088/dicom-web/`
 代理到 Orthanc DICOMweb。DICOMweb / WADO 入口會先呼叫 backend 驗證 Keycloak Bearer token，
 使用者必須具備 `viewer` role 才能讀取影像；Nginx 只會在通過驗證後，於內部補 Orthanc basic auth。
 
-Orthanc 管理 UI 也透過 frontend Nginx 暴露在 `http://localhost:18042`，每個請求都會先呼叫
+Orthanc 管理 UI 也透過 frontend Nginx 暴露在 `https://localhost:18042`，每個請求都會先呼叫
 backend 驗證 Keycloak token，且使用者必須具備 `admin` role。真正的 Orthanc HTTP port 不直接暴露到 host。
 
 OHIF viewer 本機開發網址：
 
 ```text
-http://localhost:13000
+https://localhost:13000
 ```
 
 正式環境建議改成：
@@ -1282,11 +1303,14 @@ Nginx / auth-service 驗證 token
 
 ## 登入注意事項
 
-- `admin / admin` 是 Keycloak 管理後台帳號，只能用在 `http://localhost:8080/admin`。
-- `customer-a / customer-a`、`customer-b / customer-b`、`portal-admin / portal-admin` 是 `dicom` realm 的測試客戶帳號，請從 `http://localhost:8088` 按「SSO 登入」進入，不要在 Keycloak 管理後台登入。
+- `admin / admin` 是 Keycloak 管理後台帳號，只能用在 `https://localhost:8443/admin`。
+- `customer-a / customer-a`、`customer-b / customer-b`、`portal-admin / portal-admin` 是 `dicom` realm 的測試客戶帳號，請從 `https://localhost:8088/`（電子病歷交換平台）或 `https://localhost:8088/upload/`（影像上傳）按「SSO 登入」進入，不要在 Keycloak 管理後台登入。
 - 若之前啟動過舊版容器，請用 `docker compose down -v` 清掉舊資料後再 `docker compose up --build`，避免 realm 沒有重新匯入。
 - 新增的 `fhir-user` / `fhir-admin` role 需要 Keycloak 重新匯入 realm 才會出現。因為 `keycloak` 服務沒有掛 volume，重建容器就會重新匯入：`docker compose up -d --force-recreate keycloak`。
-- 登入後右上角會依 role 顯示管理連結：`admin` 看得到 Keycloak / Orthanc 管理，`wazuh-*` 看得到 Wazuh，`fhir-*` 看得到 FHIR Server。沒有對應 role 的人看不到，也打不進去（後端與 Nginx 會擋）。
+- 主入口 `https://<host>:8088/` 會導向電子病歷交換平台 `/his/`；DICOM 影像上傳管理入口在 `/upload/`。
+- 上傳入口右上角只留「Orthanc 管理」（需 `admin`）與「電子病歷交換平台」（需 `fhir-*`）。
+- 「Keycloak 管理」與「FHIR Server」移到電子病歷交換平台的上方工具列，同樣依 role 顯示：
+  Keycloak 管理需 `admin`，FHIR Server 需 `admin` / `fhir-admin`。沒有 role 的人看不到，也打不進去（後端與 Nginx 會擋）。
 - `customer-a` / `customer-b` 已補上 email，可以用 password grant 直接換 token 測 API。若你的環境是舊的 realm 匯入檔，這兩個帳號會因為沒有 email 而回 `Account is not fully set up`，重建 Keycloak 容器或在管理後台補上 email 即可。
 - 登入後閒置 18 分鐘會跳出「是否要延長登入時間？」，20 分鐘沒有動作才自動登出；有在操作就會一直延長。
-- 驗收權限差異最快的方式：`portal-admin` 有 `fhir-admin` 可以建檔，`customer-a` 只有 `fhir-user`，登入 `http://localhost:8088/his/` 後看不到任何建檔按鈕。
+- 驗收權限差異最快的方式：`portal-admin` 有 `fhir-admin` 可以建檔，`customer-a` 只有 `fhir-user`，登入 `https://localhost:8088/his/` 後看不到任何建檔按鈕。

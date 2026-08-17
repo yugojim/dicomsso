@@ -8,8 +8,9 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
-    ports:
-      - "15432:5432"
+    # 不對外開 port，維修請用：docker compose exec postgres psql -U dicom -d dicom_portal
+    expose:
+      - "5432"
 
   orthanc:
     image: jodogne/orthanc-plugins
@@ -28,11 +29,15 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # TLS 在 nginx :8443 終結，Keycloak 靠 X-Forwarded-* 產生正確的 issuer 與轉址
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
     volumes:
       - ./keycloak/realm-dicom.json:/opt/keycloak/data/import/realm-dicom.json:ro
       - ./keycloak/themes/dicom:/opt/keycloak/themes/dicom:ro
-    ports:
-      - "8080:8080"
+    # 不對外開 port：一律走 https://<host>:8443（nginx 反向代理）
+    expose:
+      - "8080"
 
   backend:
     build: ./backend
@@ -41,15 +46,15 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USERNAME: orthanc
       ORTHANC_PASSWORD: orthanc
-      KEYCLOAK_ISSUER: http://localhost:8080/realms/dicom
-      KEYCLOAK_ALLOWED_ISSUERS: http://localhost:8080/realms/dicom,http://192.168.1.122:8080/realms/dicom,http://192.168.1.112:8080/realms/dicom,http://192.168.1.105:8080/realms/dicom
+      KEYCLOAK_ISSUER: https://192.168.1.122:8443/realms/dicom
+      KEYCLOAK_ALLOWED_ISSUERS: https://192.168.1.122:8443/realms/dicom,https://192.168.1.112:8443/realms/dicom,https://192.168.1.105:8443/realms/dicom,https://localhost:8443/realms/dicom,https://127.0.0.1:8443/realms/dicom
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/dicom/protocol/openid-connect/certs
       KEYCLOAK_CLIENT_ID: dicom-portal
       KEYCLOAK_AUDIENCE: dicom-portal-api
       TENANT_CLAIM: tenant_id
-      CORS_ORIGIN: http://localhost:8088
-      OHIF_VIEWER_URL: http://localhost:13000/viewer
-      DICOMWEB_PUBLIC_URL: ${DICOMWEB_PUBLIC_URL:-http://localhost:8088/dicom-web}
+      CORS_ORIGIN: https://192.168.1.122:8088
+      OHIF_VIEWER_URL: ${OHIF_VIEWER_URL:-https://192.168.1.122:13000/viewer}
+      DICOMWEB_PUBLIC_URL: ${DICOMWEB_PUBLIC_URL:-https://192.168.1.122:8088/dicom-web}
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN:-}
       LINE_CHANNEL_SECRET: ${LINE_CHANNEL_SECRET:-}
       LINE_GROUP_ID: ${LINE_GROUP_ID:-}
@@ -58,8 +63,9 @@ services:
       - postgres
       - orthanc
       - keycloak
-    ports:
-      - "18000:8000"
+    # 不對外開 port：一律經由 nginx 的 /api/（維修可用 docker compose exec）
+    expose:
+      - "8000"
 
   hapi-fhir:
     image: hapiproject/hapi:latest
@@ -82,25 +88,30 @@ services:
       - ./ohif/app-config.js:/usr/share/nginx/html/app-config.js:ro
     depends_on:
       - orthanc
-      - frontend
-    ports:
-      - "13000:80"
+    # 不對外開 port：一律走 https://<host>:13000（nginx 反向代理）
+    expose:
+      - "80"
 
   frontend:
     image: nginx:1.27-alpine
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - backend
       - orthanc
       - hapi-fhir
+      - keycloak
+      - ohif
     ports:
-      - "80:80"
-      - "8088:80"
-      - "18042:8042"
-      - "15601:5601"
-      - "18090:8090"
+      - "80:80"        # 只做 http → https 轉址
+      - "8088:8088"    # 主入口（https）
+      - "8443:8443"    # Keycloak（https）
+      - "13000:13000"  # OHIF Viewer（https）
+      - "18042:18042"  # Orthanc 管理入口（https）
+      - "15601:15601"  # Wazuh Dashboard（https）
+      - "18090:18090"  # HAPI FHIR 對外 API（https）
 
 volumes:
   postgres_data:

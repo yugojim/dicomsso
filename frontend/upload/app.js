@@ -1,10 +1,12 @@
 const currentHost = window.location.hostname;
 const appScheme = window.location.protocol;
 const apiBase = window.location.origin;
-const keycloakBase = `${appScheme}//${currentHost}:8080`;
+// https 時 Keycloak 走 nginx 的 8443（TLS 終結），http 時才是舊的直連 8080
+const keycloakBase = appScheme === "https:"
+  ? `https://${currentHost}:8443`
+  : `http://${currentHost}:8080`;
 const ohifBase = `${appScheme}//${currentHost}:13000`;
 const orthancAdminBase = `${appScheme}//${currentHost}:18042`;
-const fhirBase = `${appScheme}//${currentHost}:18090`;
 const realm = "dicom";
 const clientId = "dicom-portal";
 const redirectUri = window.location.origin + window.location.pathname;
@@ -143,7 +145,7 @@ function saveTokenCookie() {
   if (!tokenSet?.access_token) return;
   const validUntil = Math.min(tokenSet.expires_at || 0, tokenSet.authenticated_until || 0);
   const maxAge = Math.max(0, Math.floor((validUntil - Date.now()) / 1000));
-  document.cookie = `kc_token=${encodeURIComponent(tokenSet.access_token)}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+  document.cookie = `kc_token=${encodeURIComponent(tokenSet.access_token)}; Max-Age=${maxAge}; Path=/; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
 }
 
 function isAuthenticated() {
@@ -406,16 +408,12 @@ function formatUploadResult(body, ok) {
 }
 
 function updateButtons() {
-  $("keycloakAdminLink").href = `${keycloakBase}/admin/master/console/#/${realm}`;
   $("orthancAdminLink").href = `${orthancAdminBase}/app/explorer.html`;
-  $("fhirLink").href = `${fhirBase}/`;
   $("loginBtn").hidden = isAuthenticated();
   $("registerBtn").hidden = isAuthenticated();
   $("logoutBtn").hidden = !isAuthenticated();
-  $("keycloakAdminLink").hidden = !isAuthenticated() || !hasRealmRole("admin");
   $("orthancAdminLink").hidden = !isAuthenticated() || !hasRealmRole("admin");
   $("hisLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "fhir-admin", "fhir-user");
-  $("fhirLink").hidden = !isAuthenticated() || !hasAnyRealmRole("admin", "fhir-admin", "fhir-user");
 }
 
 async function init() {

@@ -1,6 +1,6 @@
 const host = window.location.hostname;
 const scheme = window.location.protocol;
-const keycloakUrl = `${scheme}//${host}:8080`;
+const keycloakUrl = scheme === 'https:' ? `https://${host}:8443` : `http://${host}:8080`;
 const portalUrl = `${scheme}//${host}:8088`;
 const ohifUrl = `${scheme}//${host}:13000`;
 const accessToken = new URLSearchParams(window.location.search).get('token');

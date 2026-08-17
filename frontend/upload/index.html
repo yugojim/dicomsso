@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <title>DICOM 客戶上傳入口</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/upload/styles.css" />
 </head>
 <body>
   <header class="site-header">
@@ -16,10 +17,8 @@
       </span>
     </a>
     <nav class="actions" aria-label="系統操作">
-      <a id="keycloakAdminLink" class="admin-link" href="http://localhost:8080/admin/master/console/#/dicom" target="_blank" rel="noopener" hidden>Keycloak 管理</a>
       <a id="orthancAdminLink" class="admin-link" href="http://localhost:18042/app/explorer.html" target="_blank" rel="noopener" hidden>Orthanc 管理</a>
       <a id="hisLink" class="admin-link" href="/his/" hidden>電子病歷交換平台</a>
-      <a id="fhirLink" class="admin-link" href="http://localhost:18090/" target="_blank" rel="noopener" hidden>FHIR Server</a>
       <button id="loginBtn">SSO 登入</button>
       <button id="registerBtn" class="secondary">註冊帳號</button>
       <button id="logoutBtn" class="secondary" hidden>登出</button>
@@ -97,7 +96,7 @@
     </section>
   </main>
 
-  <script src="/session-timeout.js?v=20260814-idle"></script>
-  <script src="/app.js?v=20260814-idle"></script>
+  <script src="/session-timeout.js?v=20260817-tls"></script>
+  <script src="/upload/app.js?v=20260817-root"></script>
 </body>
 </html>

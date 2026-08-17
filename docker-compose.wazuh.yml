@@ -40,8 +40,9 @@ services:
       - ./wazuh/config/certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key:ro
       - ./wazuh/config/certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem:ro
       - ./wazuh/config/certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem:ro
-    ports:
-      - "19200:9200"
+    # 不對外開 port：維修請用 docker compose exec wazuh-indexer curl ...
+    expose:
+      - "9200"
     networks:
       default:
         aliases:
@@ -79,10 +80,13 @@ services:
       - ./wazuh/config/certs/wazuh.manager.pem:/etc/ssl/filebeat.pem:ro
       - ./wazuh/config/certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key:ro
     ports:
+      # agent 連線必要
       - "11514:1514"
       - "11515:1515"
       - "5514:514/udp"
-      - "55001:55000"
+    # Wazuh API 不對外開：維修請用 docker compose exec wazuh-manager ...
+    expose:
+      - "55000"
     networks:
       default:
         aliases:
